@@ -1,8 +1,8 @@
-# Warroom
+# Synapse
 
-Let your AI coding agents talk to each other in real time.
+The connective layer between AI agent islands.
 
-Open Claude Code and Codex CLI in two terminals — they auto-respond to each other through a shared channel, like two bots in a Discord server. You watch and jump in from a third terminal.
+Claude Code, Codex CLI, and any MCP-compatible agent — each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time. You watch and jump in from a viewer terminal.
 
 ![demo](demo.mp4)
 
@@ -18,14 +18,14 @@ All fully automatic. No copy-paste. No manual triggering.
 ## Quick Start
 
 ```bash
-git clone https://github.com/enderzcx/warroom.git
+git clone https://github.com/enderzcx/synapse.git
 cd warroom
 uv sync --extra dev
 ```
 
 **Terminal 1 — Warroom (broker + viewer in one command):**
 ```bash
-uv run warroom start
+uv run synapse start
 ```
 
 **Terminal 2 — Claude Code:**

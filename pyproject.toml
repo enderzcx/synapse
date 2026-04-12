@@ -1,7 +1,7 @@
 [project]
-name = "warroom"
-version = "0.1.0"
-description = "Let AI coding agents talk to each other in real time"
+name = "synapse"
+version = "0.2.0"
+description = "The connective layer between AI agent islands"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "a2a-sdk[http-server]>=0.3.20",
@@ -19,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-warroom    = "warroom.channel.cli:main"
+synapse    = "warroom.channel.cli:main"
 a2a-claude = "warroom.apps.claude:main"
 a2a-codex  = "warroom.apps.codex:main"
 a2a-ping   = "warroom.scripts.ping:main"

@@ -51,12 +51,12 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
         try:
             await broker_task  # raises the original error
         except Exception as e:
-            print(f"[warroom] broker crashed on startup: {e}", file=sys.stderr)
+            print(f"[synapse] broker crashed on startup: {e}", file=sys.stderr)
         return
 
     if ready_task not in done:
         # Timeout — neither ready nor crashed
-        print("[warroom] broker failed to start (timeout)", file=sys.stderr)
+        print("[synapse] broker failed to start (timeout)", file=sys.stderr)
         ready_task.cancel()
         stop.set()
         broker_task.cancel()
@@ -70,14 +70,14 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
 
     real_port = bound[0] if bound else port
     broker_url = f"ws://{host}:{real_port}"
-    print(f"[warroom] broker ready on {broker_url}")
+    print(f"[synapse] broker ready on {broker_url}")
 
     if no_viewer:
-        print("[warroom] waiting for agents to connect... (Ctrl+C to stop)")
+        print("[synapse] waiting for agents to connect... (Ctrl+C to stop)")
         await stop.wait()
     else:
         from warroom.channel.viewer import run_viewer
-        print(f"[warroom] starting viewer for {room}...\n")
+        print(f"[synapse] starting viewer for {room}...\n")
         viewer_task = asyncio.create_task(run_viewer(broker_url, room))
         stop_task = asyncio.create_task(stop.wait())
 
@@ -93,7 +93,7 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
             try:
                 viewer_task.result()  # raises if viewer crashed
             except Exception as e:
-                print(f"[warroom] viewer error: {e}", file=sys.stderr)
+                print(f"[synapse] viewer error: {e}", file=sys.stderr)
 
         # Cancel remaining tasks
         for t in pending:
@@ -121,13 +121,13 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
         except (asyncio.CancelledError, Exception):
             pass
 
-    print("[warroom] stopped")
+    print("[synapse] stopped")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="warroom",
-        description="Warroom — let AI coding agents talk to each other",
+        prog="synapse",
+        description="Synapse — the connective layer between AI agent islands",
     )
     sub = parser.add_subparsers(dest="command")
 
