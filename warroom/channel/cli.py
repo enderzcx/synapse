@@ -1,9 +1,8 @@
 """warroom start — one command to launch broker + viewer.
 
 Usage:
-    uv run python -m warroom.channel.cli start
-    uv run python -m warroom.channel.cli start --no-viewer
-    uv run python -m warroom.channel.cli stop
+    uv run warroom start
+    uv run warroom start --no-viewer
 """
 from __future__ import annotations
 
@@ -37,33 +36,66 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
         stop_event=stop, ready_event=ready, bound_port_box=bound,
     ))
 
-    try:
-        await asyncio.wait_for(ready.wait(), timeout=5.0)
-    except asyncio.TimeoutError:
-        print("[warroom] broker failed to start", file=sys.stderr)
-        stop.set()
-        await broker_task
+    # MED 1 fix: race ready.wait against broker_task so a startup crash
+    # surfaces immediately instead of waiting 5s then misreporting.
+    ready_task = asyncio.create_task(ready.wait())
+    done, _pending = await asyncio.wait(
+        {ready_task, broker_task},
+        timeout=5.0,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    if broker_task in done:
+        # Broker crashed during startup — surface the real exception
+        ready_task.cancel()
+        try:
+            await broker_task  # raises the original error
+        except Exception as e:
+            print(f"[warroom] broker crashed on startup: {e}", file=sys.stderr)
         return
+
+    if ready_task not in done:
+        # Timeout — neither ready nor crashed
+        print("[warroom] broker failed to start (timeout)", file=sys.stderr)
+        ready_task.cancel()
+        stop.set()
+        broker_task.cancel()
+        try:
+            await broker_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        return
+
+    ready_task = None  # done, no longer needed
 
     real_port = bound[0] if bound else port
     broker_url = f"ws://{host}:{real_port}"
     print(f"[warroom] broker ready on {broker_url}")
 
     if no_viewer:
-        print(f"[warroom] waiting for agents to connect... (Ctrl+C to stop)")
+        print("[warroom] waiting for agents to connect... (Ctrl+C to stop)")
         await stop.wait()
     else:
-        # Run viewer inline (same process)
         from warroom.channel.viewer import run_viewer
         print(f"[warroom] starting viewer for {room}...\n")
         viewer_task = asyncio.create_task(run_viewer(broker_url, room))
+        stop_task = asyncio.create_task(stop.wait())
 
         # Wait for either viewer exit or stop signal
         done, pending = await asyncio.wait(
-            [viewer_task, asyncio.create_task(stop.wait())],
+            {viewer_task, stop_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         stop.set()
+
+        # LOW 3 fix: inspect done to observe viewer exceptions
+        if viewer_task in done:
+            try:
+                viewer_task.result()  # raises if viewer crashed
+            except Exception as e:
+                print(f"[warroom] viewer error: {e}", file=sys.stderr)
+
+        # Cancel remaining tasks
         for t in pending:
             t.cancel()
             try:
@@ -71,11 +103,18 @@ async def _start(host: str, port: int, db_path: str, room: str, no_viewer: bool)
             except (asyncio.CancelledError, Exception):
                 pass
 
-    # Shutdown broker
+    # MED 2 fix: don't use wait_for (it cancels on timeout, skipping cleanup).
+    # Instead: set stop, wait with timeout, only cancel after that.
     stop.set()
     try:
-        await asyncio.wait_for(broker_task, timeout=3.0)
-    except asyncio.TimeoutError:
+        done, _ = await asyncio.wait({broker_task}, timeout=3.0)
+        if broker_task not in done:
+            broker_task.cancel()
+            try:
+                await broker_task
+            except (asyncio.CancelledError, Exception):
+                pass
+    except Exception:
         broker_task.cancel()
         try:
             await broker_task
