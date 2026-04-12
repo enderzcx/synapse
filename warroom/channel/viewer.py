@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import re
 import sys
+import textwrap
 from datetime import datetime
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.patch_stdout import patch_stdout
 
@@ -30,29 +33,113 @@ ACTOR_COLORS = {
     "system": "ansigreen",
 }
 
+# Match ``` code blocks (with optional language tag)
+_CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
-def _format_msg(msg: dict) -> FormattedText:
+
+def _terminal_width() -> int:
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        return 80
+
+
+def _format_msg(msg: dict) -> None:
+    """Print a single channel message with proper formatting.
+
+    - Header line: [HH:MM:SS] actor:
+    - Content lines indented under the header
+    - Code blocks get a distinct color
+    - Long lines word-wrapped to terminal width
+    """
     ts_raw = msg.get("ts", 0)
     ts = datetime.fromtimestamp(ts_raw).strftime("%H:%M:%S")
     actor = msg.get("actor", "?")
     content = msg.get("content", "")
     color = ACTOR_COLORS.get(actor, "ansiwhite")
 
-    # System messages (from shim bootstrap) get special color
+    # System messages
     if content.startswith("[system]"):
         color = "ansigreen"
+        print_formatted_text(FormattedText([
+            ("ansigreen", f"  [{ts}] "),
+            ("ansigreen bold", f"{content}"),
+        ]))
+        return
 
-    return FormattedText([
-        ("ansiblack bold", f"[{ts}] "),
-        (f"{color} bold", f"{actor}: "),
-        ("", content),
-    ])
+    # Header line
+    prefix = f"[{ts}] "
+    indent = " " * len(prefix)
+    wrap_width = max(_terminal_width() - len(indent) - 2, 40)
+
+    print_formatted_text(FormattedText([
+        ("ansigray bold", prefix),
+        (f"{color} bold", f"{actor}:"),
+    ]))
+
+    # Split content into code blocks and text segments
+    parts = _split_code_blocks(content)
+
+    for is_code, lang, text in parts:
+        if is_code:
+            # Code block: dim border + content
+            print_formatted_text(FormattedText([
+                ("ansigray", f"{indent}  "),
+                ("ansigray bold", f"```{lang}"),
+            ]))
+            for line in text.splitlines():
+                print_formatted_text(FormattedText([
+                    ("ansigray", f"{indent}  "),
+                    ("ansiwhite", line),
+                ]))
+            print_formatted_text(FormattedText([
+                ("ansigray", f"{indent}  "),
+                ("ansigray bold", "```"),
+            ]))
+        else:
+            # Regular text: word-wrap and indent
+            for paragraph in text.split("\n"):
+                paragraph = paragraph.strip()
+                if not paragraph:
+                    continue
+                # Bullet points: keep as-is with indent
+                if paragraph.startswith(("- ", "* ", "• ")):
+                    wrapped = textwrap.fill(
+                        paragraph, width=wrap_width,
+                        initial_indent=f"{indent}  ",
+                        subsequent_indent=f"{indent}    ",
+                    )
+                else:
+                    wrapped = textwrap.fill(
+                        paragraph, width=wrap_width,
+                        initial_indent=f"{indent}  ",
+                        subsequent_indent=f"{indent}  ",
+                    )
+                print_formatted_text(FormattedText([("", wrapped)]))
+
+    # Blank line after message for visual separation
+    print_formatted_text(FormattedText([("", "")]))
 
 
-def _print_msg(msg: dict) -> None:
-    """Print a message using prompt_toolkit's patch_stdout-safe printer."""
-    from prompt_toolkit import print_formatted_text
-    print_formatted_text(_format_msg(msg))
+def _split_code_blocks(content: str) -> list[tuple[bool, str, str]]:
+    """Split content into (is_code, lang, text) segments.
+
+    Returns alternating text/code segments. Text segments have is_code=False.
+    """
+    parts: list[tuple[bool, str, str]] = []
+    last_end = 0
+    for m in _CODE_BLOCK_RE.finditer(content):
+        # Text before this code block
+        before = content[last_end:m.start()].strip()
+        if before:
+            parts.append((False, "", before))
+        parts.append((True, m.group(1), m.group(2).strip()))
+        last_end = m.end()
+    # Remaining text after last code block
+    remaining = content[last_end:].strip()
+    if remaining:
+        parts.append((False, "", remaining))
+    return parts
 
 
 async def _printer(client: ChannelClient, room: str) -> None:
@@ -64,8 +151,8 @@ async def _printer(client: ChannelClient, room: str) -> None:
             print("\n[viewer] broker connection lost", file=sys.stderr)
             break
         if msg is None:
-            continue  # timeout, loop
-        _print_msg(msg)
+            continue
+        _format_msg(msg)
 
 
 async def run_viewer(broker_url: str, room: str) -> None:
