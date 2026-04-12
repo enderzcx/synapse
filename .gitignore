@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.pytest_logs/
+dist/
+build/
+*.egg-info/
+.uv/
+uv.lock
+
+# docs and design iterations (not for public repo)
+docs/
+PLAN.md
+scripts/scratch_*
+scripts/channel_probe_tool.py
+
+# local config
+.claude/
+.mcp.json
+
+# media / temp
+V/
+*.mp4

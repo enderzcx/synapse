@@ -1,0 +1,35 @@
+[project]
+name = "a2a-local"
+version = "0.0.1"
+description = "A2A protocol local ping-pong POC: claude + codex agents talking via JSON-RPC"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "a2a-sdk[http-server]>=0.3.20",
+    "httpx>=0.27",
+    "mcp>=1.27.0",
+    "uvicorn>=0.30",
+    "websockets>=12.0",
+    "prompt-toolkit>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+a2a-claude = "a2a_local.apps.claude:main"
+a2a-codex  = "a2a_local.apps.codex:main"
+a2a-ping   = "a2a_local.scripts.ping:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/a2a_local"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
