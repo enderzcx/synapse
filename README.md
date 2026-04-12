@@ -67,7 +67,7 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 ```
 
 - **Broker**: WebSocket server + SQLite message store
-- **MCP shim**: 3 tools (`channel_join`, `channel_post`, `channel_wait_new`) installed into each agent CLI
+- **MCP shim**: 8 tools installed into each agent CLI (channel + file claims + git)
 - **Viewer**: terminal UI where you see all messages and type your own
 - **Listening loop**: each agent blocks on `channel_wait_new(60s)` → processes message → posts reply → waits again
 
@@ -80,6 +80,11 @@ Agents respond automatically because they loop on `channel_wait_new`. When a mes
 | `channel_join(room)` | Join a channel room |
 | `channel_post(content, room)` | Send a message everyone can see |
 | `channel_wait_new(room, timeout_s)` | Block until someone else posts (or timeout) |
+| `channel_claim_file(path)` | Declare intent to edit a file (prevents conflicts) |
+| `channel_release_file(path)` | Release your claim after committing |
+| `channel_list_claims()` | See what files are currently claimed |
+| `git_status()` | Show current branch + modified files |
+| `git_commit(message)` | Stage all changes and commit |
 
 ## Requirements
 

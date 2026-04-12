@@ -50,10 +50,10 @@ class Broker:
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
         self.rooms: dict[str, list[ConnState]] = {}
-        # v5 HIGH 1 fix: map (room, actor) -> OWNING ConnState, not just client_id.
-        # This prevents a stale disconnect from a previous ConnState claiming the
-        # same client_id from clearing the entry owned by a newer rejoin.
         self.active_joins: dict[tuple[str, str], ConnState] = {}
+        # File claims: {(room, path): actor} — lightweight lock to prevent
+        # two agents from simultaneously editing the same file.
+        self.file_claims: dict[tuple[str, str], str] = {}
 
     # --- top-level entry points ---
 
@@ -63,6 +63,12 @@ class Broker:
             await self._on_join(state, frame)
         elif op == FrameType.POST:
             await self._on_post(state, frame)
+        elif op == "claim_file":
+            await self._on_claim_file(state, frame)
+        elif op == "release_file":
+            await self._on_release_file(state, frame)
+        elif op == "list_claims":
+            await self._on_list_claims(state, frame)
         elif op == FrameType.PING:
             await self._send(state, {
                 "op": FrameType.PONG,
@@ -94,6 +100,14 @@ class Broker:
                 key = (room, state.actor)
                 if self.active_joins.get(key) is state:
                     del self.active_joins[key]
+            # Release all file claims owned by this actor in this room
+            if state.actor is not None:
+                to_release = [
+                    k for k, v in self.file_claims.items()
+                    if k[0] == room and v == state.actor
+                ]
+                for k in to_release:
+                    del self.file_claims[k]
         state.joined_rooms.clear()
 
     # --- handlers ---
@@ -213,6 +227,103 @@ class Broker:
 
         # Broadcast to all room subscribers EXCEPT poster (by client_id)
         await self._broadcast(room, msg.to_dict(), exclude_client_id=client_id)
+
+    # --- file claims ---
+
+    async def _on_claim_file(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room")
+        path = frame.get("path")
+        actor = state.actor
+
+        if not (isinstance(room, str) and isinstance(path, str)):
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "bad_request", "message": "claim_file requires room and path",
+            })
+            return
+
+        # MED 1 fix: must be joined with a real actor name
+        if actor is None or room not in state.joined_rooms:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_joined", "message": "must join room before claiming files",
+            })
+            return
+
+        key = (room, path)
+        existing = self.file_claims.get(key)
+
+        if existing is not None and existing != actor:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "file_conflict",
+                "message": f"{path} is already claimed by {existing}",
+            })
+            return
+
+        # LOW 3 fix: idempotent re-claim = ack only, no broadcast/db insert
+        if existing == actor:
+            await self._send(state, {
+                "op": "file_claimed", "reply_to_req_id": req_id,
+                "ok": True, "path": path, "actor": actor, "already_claimed": True,
+            })
+            return
+
+        # Fresh claim
+        self.file_claims[key] = actor
+        await self._send(state, {
+            "op": "file_claimed", "reply_to_req_id": req_id,
+            "ok": True, "path": path, "actor": actor,
+        })
+
+        # Broadcast system message so everyone sees the claim
+        from warroom.channel.protocol import Message, text_part
+        ts = time.time()
+        msg = Message(
+            id=0, ts=ts, room=room, actor=actor,
+            client_id=state.client_id,
+            parts=[text_part(f"[system] {actor} claimed {path}")],
+        )
+        new_id = insert_message(self._db, msg)
+        msg.id = new_id
+        await self._broadcast(room, msg.to_dict(), exclude_client_id=state.client_id)
+
+    async def _on_release_file(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room")
+        path = frame.get("path")
+        actor = state.actor
+
+        if actor is None or not isinstance(room, str) or room not in state.joined_rooms:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_joined", "message": "must join room before releasing files",
+            })
+            return
+
+        key = (room, path) if isinstance(path, str) else (None, None)
+        existing = self.file_claims.get(key)  # type: ignore[arg-type]
+        if existing == actor:
+            del self.file_claims[key]  # type: ignore[arg-type]
+
+        await self._send(state, {
+            "op": "file_released", "reply_to_req_id": req_id,
+            "ok": True, "path": path,
+        })
+
+    async def _on_list_claims(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        claims = [
+            {"path": k[1], "actor": v}
+            for k, v in self.file_claims.items()
+            if k[0] == room
+        ]
+        await self._send(state, {
+            "op": "claims_list", "reply_to_req_id": req_id,
+            "ok": True, "claims": claims,
+        })
 
     # --- helpers ---
 

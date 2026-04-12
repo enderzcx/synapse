@@ -15,6 +15,19 @@ When the `channel` MCP server is available and the user asks you to join the cha
    - After posting your response, call `channel_wait_new` again
 3. The loop exits **only** when the user interrupts you.
 
+## File Safety
+
+Before editing any file:
+1. Call `channel_claim_file(path="<filename>")` to declare your intent
+2. If you get a `file_conflict` error, another agent is editing that file — coordinate via `channel_post` before proceeding
+3. After committing your changes, call `channel_release_file(path="<filename>")`
+4. Use `channel_list_claims()` to see what files are currently being edited by others
+
+After finishing work:
+- Call `git_commit(message="...")` to save your changes
+- Call `channel_release_file` for each file you claimed
+- Post a summary to the channel
+
 ## Message Format
 
 When posting to the channel:

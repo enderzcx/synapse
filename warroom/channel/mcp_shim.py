@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
@@ -41,6 +42,7 @@ logger = logging.getLogger("a2a.channel.shim")
 # --- globals set by __main__ ---
 _actor: str = "unknown"
 _broker_url: str = "ws://127.0.0.1:9100"
+_repo_root: str = ""  # explicit repo root for git ops (MED 2 fix)
 _client: ChannelClient | None = None
 _listening_announced: dict[str, bool] = {}  # room -> bool
 
@@ -144,15 +146,80 @@ async def channel_wait_new(
     return {"ok": True, "msg": msg}
 
 
+@mcp.tool()
+async def git_status() -> dict:
+    """Show current git branch, modified files, and commits ahead of main.
+
+    Check this before and after editing files to stay aware of repo state.
+    Returns {"ok": true, "branch": "main", "modified": [...], "staged": [...], "commits_ahead": 0}.
+    """
+    from warroom.channel.git_ops import get_status
+    return await get_status(cwd=_repo_root or os.getcwd())
+
+
+@mcp.tool()
+async def git_commit(message: str) -> dict:
+    """Stage all changes and commit with the given message.
+
+    Call after finishing a task to save your work. Other agents and the user
+    can see your commits in git log.
+
+    Returns {"ok": true, "commit": "abc123", "files": ["app.py"], "message": "..."}.
+    """
+    from warroom.channel.git_ops import commit_all
+    return await commit_all(message=message, cwd=_repo_root or os.getcwd())
+
+
+@mcp.tool()
+async def channel_claim_file(path: str, room: str = "room1") -> dict:
+    """Declare intent to modify a file. Other agents will be blocked from
+    claiming the same file until you release it.
+
+    Call BEFORE editing any file. If another agent already claimed this path,
+    you get an error — coordinate via channel_post before proceeding.
+
+    Returns {"ok": true, "path": "auth.py"} on success, or error with
+    "file_conflict" code if another agent holds the claim.
+    """
+    client = await _ensure_client()
+    return await client._request("claim_file", room=room, path=path)
+
+
+@mcp.tool()
+async def channel_release_file(path: str, room: str = "room1") -> dict:
+    """Release your claim on a file after you're done editing it.
+
+    Always release files after committing your changes so other agents
+    can work on them.
+
+    Returns {"ok": true, "path": "auth.py"}.
+    """
+    client = await _ensure_client()
+    return await client._request("release_file", room=room, path=path)
+
+
+@mcp.tool()
+async def channel_list_claims(room: str = "room1") -> dict:
+    """List all currently claimed files in the room.
+
+    Returns {"ok": true, "claims": [{"path": "auth.py", "actor": "claude"}, ...]}.
+    Check this before starting work to see what files are already being edited.
+    """
+    client = await _ensure_client()
+    return await client._request("list_claims", room=room)
+
+
 def main() -> None:
-    global _actor, _broker_url
+    global _actor, _broker_url, _repo_root
 
     parser = argparse.ArgumentParser(description="A2A channel MCP shim")
     parser.add_argument("--actor", required=True, help="Actor name (claude/codex/user)")
     parser.add_argument("--broker", default="ws://127.0.0.1:9100", help="Broker WebSocket URL")
+    parser.add_argument("--cwd", default="", help="Repo root for git operations (default: process cwd)")
     args = parser.parse_args()
     _actor = args.actor
     _broker_url = args.broker
+    _repo_root = args.cwd
     mcp.run(transport="stdio")
 
 
