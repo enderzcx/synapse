@@ -130,12 +130,19 @@ class Message:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Message":
-        # Support both A2A parts and legacy flat content
-        parts = d.get("parts")
-        if parts is None:
-            # Legacy format: plain "content" string → wrap into TextPart
-            content = d.get("content", "")
-            parts = [text_part(str(content))] if content else []
+        # Support both A2A parts and legacy flat content.
+        # If parts is missing, empty, or invalid BUT content exists, fall back
+        # to wrapping content into a TextPart (prevents silent text loss).
+        raw_parts = d.get("parts")
+        content_str = d.get("content", "")
+
+        if isinstance(raw_parts, list) and len(raw_parts) > 0:
+            parts = raw_parts
+        elif content_str:
+            # Legacy or hybrid with empty/invalid parts: wrap content
+            parts = [text_part(str(content_str))]
+        else:
+            parts = []
 
         return cls(
             id=int(d.get("id", 0)),

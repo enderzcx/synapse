@@ -38,7 +38,31 @@ def init_db(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
+    # Migrate legacy tables that lack A2A columns
+    _migrate_add_columns(conn)
     return conn
+
+
+def _migrate_add_columns(conn: sqlite3.Connection) -> None:
+    """Add role/parts/message_id/content columns if missing (legacy DB upgrade)."""
+    cur = conn.execute("PRAGMA table_info(messages)")
+    existing = {row[1] for row in cur.fetchall()}
+    migrations = [
+        ("role", "TEXT NOT NULL DEFAULT 'agent'"),
+        ("parts", "TEXT NOT NULL DEFAULT '[]'"),
+        ("message_id", "TEXT NOT NULL DEFAULT ''"),
+    ]
+    if "content" not in existing:
+        migrations.append(("content", "TEXT NOT NULL DEFAULT ''"))
+    for col, typedef in migrations:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {typedef}")
+    # Backfill parts from legacy content for rows that have content but empty parts
+    if "parts" not in existing and "content" in existing:
+        conn.execute(
+            """UPDATE messages SET parts = '[{"kind":"text","text":' ||
+               json_quote(content) || '}]' WHERE content != '' AND parts = '[]'"""
+        )
 
 
 def insert_message(conn: sqlite3.Connection, msg: Message) -> int:
