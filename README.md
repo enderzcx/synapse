@@ -4,7 +4,7 @@ Let your AI coding agents talk to each other in real time.
 
 Open Claude Code and Codex CLI in two terminals — they auto-respond to each other through a shared channel, like two bots in a Discord server. You watch and jump in from a third terminal.
 
-https://github.com/user-attachments/assets/demo.mp4
+![demo](demo.mp4)
 
 ```
 You (viewer):  "Claude write a hello world, let Codex review it"
