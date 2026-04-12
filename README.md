@@ -19,11 +19,11 @@ All fully automatic. No copy-paste. No manual triggering.
 
 ```bash
 git clone https://github.com/enderzcx/synapse.git
-cd warroom
+cd synapse
 uv sync --extra dev
 ```
 
-**Terminal 1 — Warroom (broker + viewer in one command):**
+**Terminal 1 — Synapse (broker + viewer in one command):**
 ```bash
 uv run synapse start
 ```
@@ -35,15 +35,14 @@ claude
 /channel-listen
 ```
 
-**Terminal 4 — Codex CLI:**
+**Terminal 3 — Codex CLI:**
 ```bash
 codex mcp add channel -- cmd /c uv run python -m warroom.channel.mcp_shim --actor codex --broker ws://127.0.0.1:9100
 codex
+# say: "join channel"
 ```
-Then paste this into Codex:
-> You are now in A2A channel listening mode. Call channel_join(room="room1"). Then enter an infinite loop: call channel_wait_new(room="room1"); when it returns a message, handle it as a normal task; when done, call channel_post(room="room1", content=<your reply>); then call channel_wait_new again. If timed_out=true, call it again. The loop exits only when the user interrupts you. Start now.
 
-**Terminal 2 (viewer) — start talking:**
+**Viewer — start talking:**
 ```
 > Claude write a Python hello world and let Codex review it
 ```
@@ -57,7 +56,7 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 │  Claude Code │     │  Codex CLI   │     │   Viewer     │
 │  (Terminal)  │     │  (Terminal)  │     │  (Terminal)  │
 └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-       │ MCP tool           │ MCP tool           │ WebSocket
+       │ MCP                │ MCP                │ WebSocket
        └───────────┬────────┴────────────────────┘
                    │
           ┌────────▼────────┐
@@ -66,25 +65,52 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
           └─────────────────┘
 ```
 
-- **Broker**: WebSocket server + SQLite message store
-- **MCP shim**: 8 tools installed into each agent CLI (channel + file claims + git)
-- **Viewer**: terminal UI where you see all messages and type your own
-- **Listening loop**: each agent blocks on `channel_wait_new(60s)` → processes message → posts reply → waits again
+**Broker** — WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims to prevent edit conflicts.
 
-Agents respond automatically because they loop on `channel_wait_new`. When a message arrives, the tool returns instantly, the agent processes it in its own TUI (you see it thinking, reading files, writing code), then posts back.
+**MCP Shim** — Installed into each agent CLI. Maintains a WebSocket connection to the broker with a single reader task for frame demux. Exposes 8 tools via MCP stdio protocol.
+
+**Viewer** — Terminal UI (prompt_toolkit) where the conversation timeline scrolls in real time. You type here to participate.
+
+**Listening Loop** — Each agent calls `channel_wait_new` (blocks up to 60s), processes incoming messages as normal tasks (read files, write code, think), posts replies via `channel_post`, then waits again. Timeout returns trigger an immediate re-wait — the agent stays responsive indefinitely.
 
 ## MCP Tools
+
+### Channel
 
 | Tool | What it does |
 |------|-------------|
 | `channel_join(room)` | Join a channel room |
-| `channel_post(content, room)` | Send a message everyone can see |
-| `channel_wait_new(room, timeout_s)` | Block until someone else posts (or timeout) |
-| `channel_claim_file(path)` | Declare intent to edit a file (prevents conflicts) |
-| `channel_release_file(path)` | Release your claim after committing |
-| `channel_list_claims()` | See what files are currently claimed |
-| `git_status()` | Show current branch + modified files |
+| `channel_post(content, room)` | Post a message visible to all participants |
+| `channel_wait_new(room, timeout_s)` | Block until another participant posts (or timeout) |
+
+### File Claims (conflict prevention)
+
+| Tool | What it does |
+|------|-------------|
+| `channel_claim_file(path)` | Declare intent to edit a file — other agents are blocked from claiming it |
+| `channel_release_file(path)` | Release your claim after committing changes |
+| `channel_list_claims()` | See which files are currently claimed and by whom |
+
+### Git
+
+| Tool | What it does |
+|------|-------------|
+| `git_status()` | Show current branch, modified files, staged files |
 | `git_commit(message)` | Stage all changes and commit |
+
+## Design Decisions
+
+**Why no branch isolation?** Branch isolation is a human pattern — humans can't resolve merge conflicts well, so they prevent them. AI agents *can* resolve conflicts. Synapse uses lightweight file-level claims instead: declare what you're editing, the broker detects overlaps, and agents negotiate through the channel.
+
+**Why not a headless worker?** Users want to see agents working in their real CLI terminals — reading files, calling tools, thinking. Headless workers are invisible. Synapse agents are your actual Claude Code and Codex CLI sessions.
+
+**Why WebSocket, not shared files?** Shared-file approaches (like [agent-chat](https://github.com/larryflorio/agent-chat)) require polling and can't push. WebSocket broadcast means agents respond in seconds, not minutes.
+
+**Why A2A message format?** Every message uses the [A2A standard](https://a2a-protocol.org/) parts array (`[{"kind": "text", "text": "..."}]`). Any A2A-compatible agent can read Synapse messages without learning a custom protocol.
+
+## Cross-Machine (Phase 3)
+
+The broker URL is a parameter. Change `ws://127.0.0.1:9100` to a remote address (e.g. `wss://synapse.yourdomain.com/`) and agents on different machines join the same room. Zero code changes.
 
 ## Requirements
 
@@ -92,29 +118,23 @@ Agents respond automatically because they loop on `channel_wait_new`. When a mes
 - [uv](https://github.com/astral-sh/uv)
 - Claude Code and/or Codex CLI installed with valid auth
 
-## Roadmap
-
-- [x] **Phase 1** — A2A protocol ping-pong POC (27 tests)
-- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer (70 tests)
-- [ ] **Phase 2.1** — Cross-machine channel + [GitButler](https://github.com/gitbutlerapp/gitbutler) integration
-  - Remote broker (wss) — agents on different machines join the same room
-  - Parallel branch isolation via `but` CLI — each agent works on its own branch, no file conflicts
-  - Handoff + summarize tools (inspired by [agent-chat](https://github.com/larryflorio/agent-chat))
-- [ ] **Phase 2.2** — Intent declaration layer (inspired by [MPAC](https://github.com/KaiyangQ/mpac-protocol))
-  - `channel_claim_scope` — agent declares what it plans to change before changing it
-  - Broker detects overlapping scopes → broadcasts conflict event
-  - Viewer shows conflicts for human arbitration
-- [ ] **Phase 3** — VPS agents join the channel (TradeAgent, nmem shared memory)
-
 ## Tests
 
 ```bash
-uv run pytest -v    # 70 tests, ~8 seconds
+uv run pytest -v    # 84 tests, ~10 seconds
 ```
+
+## Roadmap
+
+- [x] **Phase 1** — A2A protocol ping-pong POC (27 tests)
+- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer (43 tests)
+- [x] **Phase 2.1** — File claims + git tools for conflict prevention (12 tests)
+- [ ] **Phase 3** — Cross-machine: remote broker (wss) + VPS agents (TradeAgent, nmem)
+- [ ] **Phase 4** — Intent declaration layer (inspired by [MPAC](https://github.com/KaiyangQ/mpac-protocol))
 
 ## Acknowledgements
 
-Inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) (gateway architecture), [OpenClaw](https://github.com/openclaw/openclaw) (channel abstraction), [agent-chat](https://github.com/larryflorio/agent-chat) (handoff semantics), [MPAC](https://github.com/KaiyangQ/mpac-protocol) (intent coordination), and [GitButler](https://github.com/gitbutlerapp/gitbutler) (parallel branch isolation).
+Inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) (gateway architecture), [OpenClaw](https://github.com/openclaw/openclaw) (channel abstraction), [agent-chat](https://github.com/larryflorio/agent-chat) (handoff semantics), [MPAC](https://github.com/KaiyangQ/mpac-protocol) (intent coordination), and [GitButler](https://github.com/gitbutlerapp/gitbutler) (the "no branch isolation" insight).
 
 ## License
 
