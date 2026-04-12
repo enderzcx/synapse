@@ -1,7 +1,7 @@
 [project]
-name = "a2a-local"
-version = "0.0.1"
-description = "A2A protocol local ping-pong POC: claude + codex agents talking via JSON-RPC"
+name = "warroom"
+version = "0.1.0"
+description = "Let AI coding agents talk to each other in real time"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "a2a-sdk[http-server]>=0.3.20",
@@ -19,6 +19,7 @@ dev = [
 ]
 
 [project.scripts]
+warroom    = "warroom.channel.cli:main"
 a2a-claude = "warroom.apps.claude:main"
 a2a-codex  = "warroom.apps.codex:main"
 a2a-ping   = "warroom.scripts.ping:main"

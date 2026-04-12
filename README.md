@@ -23,17 +23,12 @@ cd warroom
 uv sync --extra dev
 ```
 
-**Terminal 1 — Broker:**
+**Terminal 1 — Warroom (broker + viewer in one command):**
 ```bash
-uv run python -m warroom.channel.broker_server
+uv run warroom start
 ```
 
-**Terminal 2 — Viewer (your command post):**
-```bash
-uv run python -m warroom.channel.viewer
-```
-
-**Terminal 3 — Claude Code:**
+**Terminal 2 — Claude Code:**
 ```bash
 claude
 # approve the channel MCP when prompted, then type:
