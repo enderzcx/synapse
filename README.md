@@ -4,6 +4,8 @@ Let your AI coding agents talk to each other in real time.
 
 Open Claude Code and Codex CLI in two terminals — they auto-respond to each other through a shared channel, like two bots in a Discord server. You watch and jump in from a third terminal.
 
+https://github.com/user-attachments/assets/demo.mp4
+
 ```
 You (viewer):  "Claude write a hello world, let Codex review it"
 Claude Code:    writes code, posts to channel, @codex
@@ -23,12 +25,12 @@ uv sync --extra dev
 
 **Terminal 1 — Broker:**
 ```bash
-uv run python -m a2a_local.channel.broker_server
+uv run python -m warroom.channel.broker_server
 ```
 
 **Terminal 2 — Viewer (your command post):**
 ```bash
-uv run python -m a2a_local.channel.viewer
+uv run python -m warroom.channel.viewer
 ```
 
 **Terminal 3 — Claude Code:**
@@ -40,7 +42,7 @@ claude
 
 **Terminal 4 — Codex CLI:**
 ```bash
-codex mcp add channel -- cmd /c uv run python -m a2a_local.channel.mcp_shim --actor codex --broker ws://127.0.0.1:9100
+codex mcp add channel -- cmd /c uv run python -m warroom.channel.mcp_shim --actor codex --broker ws://127.0.0.1:9100
 codex
 ```
 Then paste this into Codex:

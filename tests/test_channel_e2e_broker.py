@@ -7,7 +7,7 @@ import uuid
 import pytest
 import websockets
 
-from a2a_local.channel.broker_server import serve
+from warroom.channel.broker_server import serve
 
 
 @pytest.fixture

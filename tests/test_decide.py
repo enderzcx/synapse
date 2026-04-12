@@ -6,7 +6,7 @@ spinning up any server. The two-layer anti-recursion defense lives here:
   1. KNOWN_AGENTS allowlist (rejects 'ping zhuge' typos at the door)
   2. self check (target == self.name → local pong, no relay)
 """
-from a2a_local.executors.echo_relay import KNOWN_AGENTS, decide
+from warroom.executors.echo_relay import KNOWN_AGENTS, decide
 
 
 def test_known_agents_set_contains_claude_and_codex():

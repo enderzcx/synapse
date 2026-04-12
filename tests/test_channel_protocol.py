@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from a2a_local.channel.protocol import (
+from warroom.channel.protocol import (
     Frame,
     FrameType,
     Message,

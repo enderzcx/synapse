@@ -17,7 +17,7 @@ import time
 import httpx
 import pytest
 
-from a2a_local.scripts.ping import send_ping
+from warroom.scripts.ping import send_ping
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / ".pytest_logs"
@@ -48,8 +48,8 @@ def agents():
     LOG_DIR.mkdir(exist_ok=True)
     procs: list[tuple[subprocess.Popen, object, str, int]] = []
     for module, name, port in [
-        ("a2a_local.apps.claude", "claude", CLAUDE_PORT),
-        ("a2a_local.apps.codex", "codex", CODEX_PORT),
+        ("warroom.apps.claude", "claude", CLAUDE_PORT),
+        ("warroom.apps.codex", "codex", CODEX_PORT),
     ]:
         log = open(LOG_DIR / f"{name}.log", "w", encoding="utf-8")
         p = subprocess.Popen(

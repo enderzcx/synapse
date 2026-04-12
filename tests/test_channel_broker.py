@@ -10,9 +10,9 @@ from typing import Any
 
 import pytest
 
-from a2a_local.channel.broker import Broker, ConnState
-from a2a_local.channel.db import init_db
-from a2a_local.channel.protocol import FrameType
+from warroom.channel.broker import Broker, ConnState
+from warroom.channel.db import init_db
+from warroom.channel.protocol import FrameType
 
 
 class FakeWebSocket:

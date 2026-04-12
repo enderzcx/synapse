@@ -5,8 +5,8 @@ import asyncio
 
 import pytest
 
-from a2a_local.channel.broker_server import serve
-from a2a_local.channel.ws_client import ChannelClient
+from warroom.channel.broker_server import serve
+from warroom.channel.ws_client import ChannelClient
 
 
 @pytest.fixture

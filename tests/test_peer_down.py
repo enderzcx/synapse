@@ -20,7 +20,7 @@ import time
 import httpx
 import pytest
 
-from a2a_local.scripts.ping import send_ping
+from warroom.scripts.ping import send_ping
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LOG_DIR = ROOT / ".pytest_logs"
@@ -65,7 +65,7 @@ def alt_claude_dead_peer():
         [
             sys.executable,
             "-m",
-            "a2a_local.apps._alt",
+            "warroom.apps._alt",
             "claude",
             str(alive_port),
             dead_peer_url,

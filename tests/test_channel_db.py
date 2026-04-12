@@ -3,13 +3,13 @@ import time
 
 import pytest
 
-from a2a_local.channel.db import (
+from warroom.channel.db import (
     fetch_history,
     fetch_since,
     init_db,
     insert_message,
 )
-from a2a_local.channel.protocol import Message
+from warroom.channel.protocol import Message
 
 
 @pytest.fixture

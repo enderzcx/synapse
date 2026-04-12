@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from a2a_local.relay import PeerUnreachableError, forward_to_peer
+from warroom.relay import PeerUnreachableError, forward_to_peer
 
 
 def test_peer_unreachable_error_is_exception():
@@ -16,8 +16,8 @@ def test_peer_unreachable_error_is_exception():
 
 
 def test_peer_unreachable_error_is_public():
-    """Must be importable from a2a_local.relay so executors can `except` it."""
-    from a2a_local import relay
+    """Must be importable from warroom.relay so executors can `except` it."""
+    from warroom import relay
 
     assert hasattr(relay, "PeerUnreachableError")
 

@@ -1,7 +1,7 @@
 """Step 1 RED: test cards.py before it exists."""
 from a2a.types import AgentCard
 
-from a2a_local.cards import build_agent_card
+from warroom.cards import build_agent_card
 
 
 def test_build_agent_card_returns_agent_card():
