@@ -92,15 +92,29 @@ Agents respond automatically because they loop on `channel_wait_new`. When a mes
 - [uv](https://github.com/astral-sh/uv)
 - Claude Code and/or Codex CLI installed with valid auth
 
-## Cross-Machine (coming soon)
+## Roadmap
 
-The broker URL is a parameter. Change `ws://127.0.0.1:9100` to a remote address and agents on different machines join the same room. Zero code changes.
+- [x] **Phase 1** — A2A protocol ping-pong POC (27 tests)
+- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer (70 tests)
+- [ ] **Phase 2.1** — Cross-machine channel + [GitButler](https://github.com/gitbutlerapp/gitbutler) integration
+  - Remote broker (wss) — agents on different machines join the same room
+  - Parallel branch isolation via `but` CLI — each agent works on its own branch, no file conflicts
+  - Handoff + summarize tools (inspired by [agent-chat](https://github.com/larryflorio/agent-chat))
+- [ ] **Phase 2.2** — Intent declaration layer (inspired by [MPAC](https://github.com/KaiyangQ/mpac-protocol))
+  - `channel_claim_scope` — agent declares what it plans to change before changing it
+  - Broker detects overlapping scopes → broadcasts conflict event
+  - Viewer shows conflicts for human arbitration
+- [ ] **Phase 3** — VPS agents join the channel (TradeAgent, nmem shared memory)
 
 ## Tests
 
 ```bash
 uv run pytest -v    # 70 tests, ~8 seconds
 ```
+
+## Acknowledgements
+
+Inspired by [Hermes Agent](https://github.com/NousResearch/hermes-agent) (gateway architecture), [OpenClaw](https://github.com/openclaw/openclaw) (channel abstraction), [agent-chat](https://github.com/larryflorio/agent-chat) (handoff semantics), [MPAC](https://github.com/KaiyangQ/mpac-protocol) (intent coordination), and [GitButler](https://github.com/gitbutlerapp/gitbutler) (parallel branch isolation).
 
 ## License
 
