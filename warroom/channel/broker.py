@@ -148,20 +148,28 @@ class Broker:
     async def _on_post(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")
         room = frame.get("room")
-        content = frame.get("content")
         reply_to = frame.get("reply_to")
-        # v5 HIGH 2 fix: ALWAYS use the connection-bound client_id. Never
-        # trust frame["client_id"] — otherwise a malicious client can forge
-        # another actor's client_id, misattribute messages, and suppress
-        # delivery to the real owner via self-filter in wait_new().
         client_id = state.client_id
 
-        if not (isinstance(room, str) and isinstance(content, str)):
+        # A2A format: accept either `parts` array or legacy `content` string
+        parts = frame.get("parts")
+        content = frame.get("content")
+        role = frame.get("role", "agent")
+
+        if not isinstance(room, str):
             await self._send(state, {
                 "op": FrameType.ERROR,
                 "reply_to_req_id": req_id,
                 "code": "bad_request",
-                "message": "post requires string room and content",
+                "message": "post requires string room",
+            })
+            return
+        if parts is None and content is None:
+            await self._send(state, {
+                "op": FrameType.ERROR,
+                "reply_to_req_id": req_id,
+                "code": "bad_request",
+                "message": "post requires parts array or content string",
             })
             return
         if room not in state.joined_rooms:
@@ -173,6 +181,11 @@ class Broker:
             })
             return
 
+        # Build A2A-compatible parts
+        from warroom.channel.protocol import text_part
+        if parts is None:
+            parts = [text_part(str(content))]
+
         actor = state.actor or "unknown"
         ts = time.time()
         msg = Message(
@@ -181,7 +194,8 @@ class Broker:
             room=room,
             actor=actor,
             client_id=client_id,
-            content=content,
+            role=str(role),
+            parts=parts if isinstance(parts, list) else [],
             reply_to=reply_to if isinstance(reply_to, int) else None,
         )
         new_id = insert_message(self._db, msg)

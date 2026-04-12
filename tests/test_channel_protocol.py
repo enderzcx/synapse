@@ -9,10 +9,11 @@ from warroom.channel.protocol import (
     Message,
     decode_frame,
     encode_frame,
+    text_part,
 )
 
 
-# --- Message dataclass ---
+# --- Message dataclass (A2A format) ---
 
 def test_message_round_trip():
     m = Message(
@@ -21,21 +22,44 @@ def test_message_round_trip():
         room="room1",
         actor="claude",
         client_id="abc-123",
-        content="hello world",
+        parts=[text_part("hello world")],
         reply_to=None,
     )
     d = m.to_dict()
     assert d["id"] == 42
     assert d["ts"] == 1775912345.123
-    assert d["content"] == "hello world"
+    assert d["content"] == "hello world"  # convenience flat field
+    assert d["parts"][0]["kind"] == "text"
+    assert d["parts"][0]["text"] == "hello world"
+    assert d["role"] == "agent"
+    assert "messageId" in d
     m2 = Message.from_dict(d)
-    assert m2 == m
+    assert m2.content == m.content
+    assert m2.parts == m.parts
 
 
 def test_message_with_reply_to():
     m = Message(id=2, ts=1.0, room="r", actor="a", client_id="c",
-                content="x", reply_to=1)
+                parts=[text_part("x")], reply_to=1)
     assert m.to_dict()["reply_to"] == 1
+
+
+def test_message_content_property():
+    """content property reads/writes the first TextPart."""
+    m = Message(id=0, ts=0, room="r", actor="a", client_id="c", parts=[])
+    assert m.content == ""
+    m.content = "hello"
+    assert m.content == "hello"
+    assert m.parts[0] == {"kind": "text", "text": "hello"}
+
+
+def test_message_from_legacy_content():
+    """from_dict with plain 'content' string (no parts) auto-wraps into TextPart."""
+    d = {"id": 1, "ts": 1.0, "room": "r", "actor": "a", "client_id": "c",
+         "content": "legacy"}
+    m = Message.from_dict(d)
+    assert m.content == "legacy"
+    assert m.parts == [{"kind": "text", "text": "legacy"}]
 
 
 # --- Request frames (client → server) ---

@@ -1,12 +1,14 @@
-"""SQLite persistence for channel messages.
+"""SQLite persistence for channel messages (A2A-compatible format).
+
+Messages store A2A `parts` as JSON and `role` as string.
+The `content` column is kept as a denormalized convenience field
+(first TextPart's text) for simple queries and backward compat.
 
 WAL mode + busy_timeout = concurrent readers OK, writers serialized.
-Broker uses a single connection in its asyncio loop so there's no
-real concurrency — WAL is defense in depth for viewer/reader tools
-that might want to open the same db for inspection.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from warroom.channel.protocol import Message
@@ -14,26 +16,23 @@ from warroom.channel.protocol import Message
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    room      TEXT    NOT NULL,
-    ts        REAL    NOT NULL,
-    actor     TEXT    NOT NULL,
-    client_id TEXT    NOT NULL,
-    content   TEXT    NOT NULL,
-    reply_to  INTEGER
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    room       TEXT    NOT NULL,
+    ts         REAL    NOT NULL,
+    actor      TEXT    NOT NULL,
+    client_id  TEXT    NOT NULL,
+    role       TEXT    NOT NULL DEFAULT 'agent',
+    parts      TEXT    NOT NULL DEFAULT '[]',
+    message_id TEXT    NOT NULL DEFAULT '',
+    content    TEXT    NOT NULL DEFAULT '',
+    reply_to   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_room_id ON messages(room, id);
 """
 
 
 def init_db(path: str) -> sqlite3.Connection:
-    """Open (or create) the SQLite db at `path` and ensure schema exists.
-
-    `path` can be ":memory:" for ephemeral test dbs.
-    Returns a connection configured for WAL mode.
-    """
-    conn = sqlite3.connect(path, isolation_level=None)  # autocommit
-    # WAL + busy_timeout: safe for concurrent reads, writes serialized
+    conn = sqlite3.connect(path, isolation_level=None)
     if path != ":memory:":
         conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -43,16 +42,14 @@ def init_db(path: str) -> sqlite3.Connection:
 
 
 def insert_message(conn: sqlite3.Connection, msg: Message) -> int:
-    """Insert a message; returns the new autoincrement id.
-
-    `msg.id` on input is ignored (always 0 from fresh Messages).
-    """
+    parts_json = json.dumps(msg.parts, separators=(",", ":"), ensure_ascii=False)
     cur = conn.execute(
         """
-        INSERT INTO messages (room, ts, actor, client_id, content, reply_to)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (room, ts, actor, client_id, role, parts, message_id, content, reply_to)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (msg.room, msg.ts, msg.actor, msg.client_id, msg.content, msg.reply_to),
+        (msg.room, msg.ts, msg.actor, msg.client_id,
+         msg.role, parts_json, msg.message_id, msg.content, msg.reply_to),
     )
     new_id = cur.lastrowid
     assert new_id is not None
@@ -65,10 +62,9 @@ def fetch_since(
     since_id: int,
     limit: int = 50,
 ) -> list[Message]:
-    """Return messages in `room` with id > since_id, ascending by id, up to limit."""
     cur = conn.execute(
         """
-        SELECT id, ts, room, actor, client_id, content, reply_to
+        SELECT id, ts, room, actor, client_id, role, parts, message_id, content, reply_to
         FROM messages
         WHERE room = ? AND id > ?
         ORDER BY id ASC
@@ -84,18 +80,11 @@ def fetch_history(
     room: str,
     limit: int = 50,
 ) -> list[Message]:
-    """Return the LAST `limit` messages in room, ascending by id.
-
-    v5 MED 3 fix: the previous impl selected the oldest N rows (ASC LIMIT),
-    contradicting the docstring. We now grab the tail (DESC LIMIT in a
-    subquery) and re-order ascending in the outer query so callers still
-    get chronological order.
-    """
     cur = conn.execute(
         """
-        SELECT id, ts, room, actor, client_id, content, reply_to
+        SELECT id, ts, room, actor, client_id, role, parts, message_id, content, reply_to
         FROM (
-            SELECT id, ts, room, actor, client_id, content, reply_to
+            SELECT id, ts, room, actor, client_id, role, parts, message_id, content, reply_to
             FROM messages
             WHERE room = ?
             ORDER BY id DESC
@@ -109,12 +98,20 @@ def fetch_history(
 
 
 def _row_to_message(row: tuple) -> Message:
+    parts_raw = row[6]
+    try:
+        parts = json.loads(parts_raw) if parts_raw else []
+    except (json.JSONDecodeError, TypeError):
+        parts = []
+
     return Message(
         id=int(row[0]),
         ts=float(row[1]),
         room=str(row[2]),
         actor=str(row[3]),
         client_id=str(row[4]),
-        content=str(row[5]),
-        reply_to=None if row[6] is None else int(row[6]),
+        role=str(row[5]) if row[5] else "agent",
+        parts=parts if isinstance(parts, list) else [],
+        message_id=str(row[7]) if row[7] else "",
+        reply_to=None if row[9] is None else int(row[9]),
     )

@@ -9,7 +9,7 @@ from warroom.channel.db import (
     init_db,
     insert_message,
 )
-from warroom.channel.protocol import Message
+from warroom.channel.protocol import Message, text_part
 
 
 @pytest.fixture
@@ -22,12 +22,12 @@ def conn():
 def _mk(room: str = "r1", actor: str = "claude", content: str = "hi",
         ts: float | None = None, reply_to: int | None = None) -> Message:
     return Message(
-        id=0,  # will be overwritten on insert
+        id=0,
         ts=ts if ts is not None else time.time(),
         room=room,
         actor=actor,
         client_id="cid-" + actor,
-        content=content,
+        parts=[text_part(content)],
         reply_to=reply_to,
     )
 
