@@ -34,7 +34,8 @@ ACTOR_COLORS = {
 }
 
 # Match ``` code blocks (with optional language tag)
-_CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+# Match ``` code blocks — allow any non-newline info string (c++, objective-c, etc.)
+_CODE_BLOCK_RE = re.compile(r"```([^\n`]*)\n(.*?)```", re.DOTALL)
 
 
 def _terminal_width() -> int:
@@ -51,11 +52,20 @@ def _format_msg(msg: dict) -> None:
     - Content lines indented under the header
     - Code blocks get a distinct color
     - Long lines word-wrapped to terminal width
+
+    Defensively handles malformed payloads (missing/wrong-type fields).
     """
-    ts_raw = msg.get("ts", 0)
-    ts = datetime.fromtimestamp(ts_raw).strftime("%H:%M:%S")
-    actor = msg.get("actor", "?")
-    content = msg.get("content", "")
+    # Defensive normalization (HIGH 3 fix)
+    try:
+        ts_raw = float(msg.get("ts", 0))
+    except (TypeError, ValueError):
+        ts_raw = 0.0
+    try:
+        ts = datetime.fromtimestamp(ts_raw).strftime("%H:%M:%S")
+    except (OSError, ValueError):
+        ts = "??:??:??"
+    actor = str(msg.get("actor", "?"))
+    content = str(msg.get("content", ""))
     color = ACTOR_COLORS.get(actor, "ansiwhite")
 
     # System messages
@@ -103,11 +113,14 @@ def _format_msg(msg: dict) -> None:
                 if not paragraph:
                     continue
                 # Bullet points: keep as-is with indent
-                if paragraph.startswith(("- ", "* ", "• ")):
+                # Detect list items: -, *, bullet, or numbered (1. 2. etc.)
+                list_match = re.match(r'^(\s*(?:[-*]|\d+[.)]))\s+', paragraph)
+                if list_match:
+                    prefix_len = len(list_match.group(0))
                     wrapped = textwrap.fill(
                         paragraph, width=wrap_width,
                         initial_indent=f"{indent}  ",
-                        subsequent_indent=f"{indent}    ",
+                        subsequent_indent=f"{indent}  " + " " * prefix_len,
                     )
                 else:
                     wrapped = textwrap.fill(
@@ -152,7 +165,12 @@ async def _printer(client: ChannelClient, room: str) -> None:
             break
         if msg is None:
             continue
-        _format_msg(msg)
+        # HIGH 3 fix: catch rendering errors so one bad message
+        # doesn't kill the entire printer loop
+        try:
+            _format_msg(msg)
+        except Exception as e:
+            print(f"  [viewer] render error: {e}", file=sys.stderr)
 
 
 async def run_viewer(broker_url: str, room: str) -> None:
