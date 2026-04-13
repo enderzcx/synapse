@@ -294,6 +294,19 @@
     font-style: italic;
   }
 
+  /* Typing indicator */
+  .typing-indicator {
+    padding: 4px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
+    animation: typing-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes typing-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
   /* Input bar */
   .input-bar {
     grid-column: 1;
@@ -373,6 +386,9 @@
     </div>
   </div>
 
+  <!-- Typing indicator -->
+  <div class="typing-indicator" id="typing-indicator" style="display:none; grid-column:1;"></div>
+
   <!-- Input -->
   <div class="input-bar">
     <textarea id="msg-input" placeholder="Type a message..." rows="1"></textarea>
@@ -396,6 +412,7 @@ const claims = new Map();   // path -> actor
 const gitJobs = [];          // [{id, status, message}]
 const pendingMessages = new Map(); // reqId -> {content}
 const AGENT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const typingAgents = new Map(); // actor -> timeout id
 
 // --- Marked config ---
 marked.setOptions({
@@ -547,7 +564,14 @@ function handleFrame(frame) {
       break;
 
     case 'broadcast':
-      if (frame.msg) handleMessage(frame.msg);
+      if (frame.msg) {
+        // Handle agent_status_broadcast embedded in broadcast frame
+        if (frame.msg.op === 'agent_status_broadcast') {
+          handleAgentStatus(frame.msg);
+        } else {
+          handleMessage(frame.msg);
+        }
+      }
       break;
 
     case 'error':
@@ -570,7 +594,7 @@ function handleMessage(msg) {
   const content = msg.content || '';
   const actor = msg.actor || '?';
 
-  // Any message from an agent refreshes their presence
+  // Any message from an agent refreshes their presence and clears typing
   if (actor !== ACTOR && actor !== '?') {
     const existing = agents.get(actor);
     if (existing) {
@@ -578,6 +602,12 @@ function handleMessage(msg) {
       existing.online = true;
     } else {
       setAgent(actor, true, 'active');
+    }
+    // Clear typing state when agent posts a message
+    if (typingAgents.has(actor)) {
+      clearTimeout(typingAgents.get(actor));
+      typingAgents.delete(actor);
+      renderTypingIndicator();
     }
     renderAgents();
   }
@@ -662,6 +692,45 @@ function parseGitNotification(content) {
     renderJobs();
     return;
   }
+}
+
+// --- Agent status handling ---
+function handleAgentStatus(data) {
+  const actor = data.actor;
+  const phase = data.phase;
+  if (!actor || actor === ACTOR) return;
+
+  setAgent(actor, true, phase);
+
+  if (phase === 'typing') {
+    // Set typing with auto-clear after 30s
+    if (typingAgents.has(actor)) clearTimeout(typingAgents.get(actor));
+    typingAgents.set(actor, setTimeout(() => {
+      typingAgents.delete(actor);
+      renderTypingIndicator();
+    }, 30000));
+  } else {
+    // Any other phase clears typing
+    if (typingAgents.has(actor)) {
+      clearTimeout(typingAgents.get(actor));
+      typingAgents.delete(actor);
+    }
+  }
+  renderTypingIndicator();
+}
+
+function renderTypingIndicator() {
+  const el = document.getElementById('typing-indicator');
+  if (typingAgents.size === 0) {
+    el.style.display = 'none';
+    return;
+  }
+  const names = [...typingAgents.keys()];
+  const text = names.length === 1
+    ? `${names[0]} is typing...`
+    : `${names.join(', ')} are typing...`;
+  el.textContent = text;
+  el.style.display = 'block';
 }
 
 // --- Agent tracking ---

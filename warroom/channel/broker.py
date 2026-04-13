@@ -451,7 +451,7 @@ class Broker:
 
     # --- agent status / heartbeat ---
 
-    VALID_AGENT_PHASES = {"idle", "planning", "coding", "testing", "reviewing", "blocked", "waiting"}
+    VALID_AGENT_PHASES = {"idle", "planning", "coding", "testing", "reviewing", "blocked", "waiting", "typing"}
 
     async def _on_agent_status(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")
@@ -488,6 +488,15 @@ class Broker:
             "op": "agent_status_ack", "reply_to_req_id": req_id,
             "ok": True, "actor": actor, "phase": phase,
         })
+
+        # Broadcast status change to room so viewer/other agents see it
+        await self._broadcast(room, {
+            "op": "agent_status_broadcast",
+            "actor": actor,
+            "phase": phase,
+            "task_id": task_id if isinstance(task_id, str) else None,
+            "detail": str(detail)[:200],
+        }, exclude_client_id=state.client_id)
 
     # --- task registry ---
 
