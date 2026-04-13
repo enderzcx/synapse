@@ -457,6 +457,8 @@ function handleFrame(frame) {
         for (const msg of frame.recent_messages) {
           handleMessage(msg);
         }
+        // Scroll to bottom after loading history
+        messagesEl.scrollTop = messagesEl.scrollHeight;
       }
       // Request current state snapshot
       sendFrame({ op: 'room_state', room: ROOM });
