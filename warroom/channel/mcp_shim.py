@@ -172,6 +172,10 @@ async def channel_wait_new(
 
     if msg is None:
         return {"ok": True, "timed_out": True}
+    try:
+        await client._request("agent_status", room=room, phase="typing")
+    except Exception:
+        pass  # non-fatal; typing is a soft signal only
     return {"ok": True, "msg": msg}
 
 

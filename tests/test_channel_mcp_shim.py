@@ -92,6 +92,36 @@ async def test_channel_wait_new_clamps_requested_timeout(monkeypatch):
     assert result == {"ok": True, "timed_out": True}
 
 
+async def test_channel_wait_new_reports_typing_on_message(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        async def wait_new(self, room, timeout_s):
+            assert room == "room1"
+            assert timeout_s == 30.0
+            return {"id": 7, "actor": "user", "content": "ping"}
+
+        async def _request(self, op, **kwargs):
+            calls.append((op, kwargs))
+            assert op == "agent_status"
+            assert kwargs == {"room": "room1", "phase": "typing"}
+            return {"ok": True, "actor": "codex", "phase": "typing"}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+    monkeypatch.setattr(mcp_shim, "_listening_announced", {"room1": True})
+    monkeypatch.setattr(mcp_shim, "MAX_WAIT_TIMEOUT_S", 60.0)
+
+    result = await mcp_shim.channel_wait_new(room="room1", timeout_s=30.0)
+    assert result == {
+        "ok": True,
+        "msg": {"id": 7, "actor": "user", "content": "ping"},
+    }
+    assert calls == [("agent_status", {"room": "room1", "phase": "typing"})]
+
+
 async def test_channel_history_forwards(monkeypatch):
     class FakeClient:
         async def _request(self, op, **kwargs):
