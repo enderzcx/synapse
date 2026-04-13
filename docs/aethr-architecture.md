@@ -36,7 +36,7 @@ Policy Gateway (boundary controller, not just a translator)
   +-- Action approval hooks
 
 Task Space (shared by all participants)
-  +-- Tasks (lifecycle: submitted -> working -> completed)
+  +-- Tasks (lifecycle: submitted -> accepted -> working -> blocked -> completed / failed)
   +-- Artifacts (code patches / data / test results)
   +-- Reviews / Comments / Proposals
   +-- State Snapshot
@@ -177,9 +177,10 @@ These can be executed by a system agent, specialized agents, or human operators.
 - [x] Async job model for git_commit (Layer 2)
 - [x] Web viewer with 4-panel layout
 - [x] Release file broadcast
-- [ ] History replay (broker + MCP + web viewer)
+- [ ] History replay: broker join returns recent N messages, web viewer renders on load
+- [ ] `channel_history(room, limit, since_id)` MCP tool for agents
 - [ ] File claim TTL (auto-release after 10 min)
-- [ ] `channel_state(room)` initial version
+- [ ] `channel_state(room)` initial version (agents, claims, jobs)
 
 ### Iteration 2
 - [ ] Agent status protocol (working / idle / blocked)
@@ -191,7 +192,6 @@ These can be executed by a system agent, specialized agents, or human operators.
 - [ ] Task protocol (create / accept / update / complete / blocked)
 - [ ] Review artifacts (structured, not just chat messages)
 - [ ] Session recovery (reconnect -> restore tasks / claims / jobs)
-- [ ] `channel_history(room, limit, since_id)` MCP tool
 
 ## Design Principles
 
