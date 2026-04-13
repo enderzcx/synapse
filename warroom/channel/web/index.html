@@ -267,6 +267,27 @@
     color: var(--text);
   }
 
+  /* Tasks */
+  .task-item {
+    padding: 4px 0;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .task-item:last-child { border-bottom: none; }
+  .task-header { display: flex; align-items: center; gap: 6px; }
+  .task-id { font-family: monospace; color: var(--text-dim); font-size: 11px; }
+  .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .task-status {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    font-weight: 600; text-transform: uppercase;
+  }
+  .task-status.todo { background: var(--bg-hover); color: var(--text-dim); }
+  .task-status.doing { background: #1a3a2a; color: var(--accent-success); }
+  .task-status.review { background: #3a2a1a; color: var(--accent-pending); }
+  .task-status.done { background: #1a2a1a; color: var(--accent-success); }
+  .task-status.blocked { background: #3a1a1a; color: var(--accent-error); }
+
   .empty-state {
     font-size: 12px;
     color: var(--text-dim);
@@ -343,6 +364,10 @@
       <div id="claims-list"><span class="empty-state">No active claims</span></div>
     </div>
     <div class="sidebar-section">
+      <div class="sidebar-title">Tasks</div>
+      <div id="tasks-list"><span class="empty-state">No tasks</span></div>
+    </div>
+    <div class="sidebar-section">
       <div class="sidebar-title">Git Jobs</div>
       <div id="jobs-list"><span class="empty-state">No recent jobs</span></div>
     </div>
@@ -388,6 +413,7 @@ marked.setOptions({
 const messagesEl = document.getElementById('messages');
 const agentsEl = document.getElementById('agents-list');
 const claimsEl = document.getElementById('claims-list');
+const tasksEl = document.getElementById('tasks-list');
 const jobsEl = document.getElementById('jobs-list');
 const inputEl = document.getElementById('msg-input');
 const sendBtn = document.getElementById('send-btn');
@@ -498,10 +524,10 @@ function handleFrame(frame) {
             info.online = false;
             info.status = 'offline';
           }
-          // Then mark broker-confirmed agents as online
+          // Then mark broker-confirmed agents as online with phase
           for (const a of frame.active_agents) {
             if (a.actor !== ACTOR) {
-              setAgent(a.actor, true, 'online');
+              setAgent(a.actor, true, a.phase || 'online');
             }
           }
         }
@@ -512,6 +538,10 @@ function handleFrame(frame) {
             claims.set(c.path, c.actor);
           }
           renderClaims();
+        }
+        // Tasks
+        if (Array.isArray(frame.tasks)) {
+          renderTasks(frame.tasks);
         }
       }
       break;
@@ -560,6 +590,11 @@ function handleMessage(msg) {
   // Track git job notifications
   if (content.startsWith('[git]')) {
     parseGitNotification(content);
+  }
+
+  // Task changes — refresh state to get latest task list
+  if (content.startsWith('[task]') && ws && ws.readyState === WebSocket.OPEN && joined) {
+    sendFrame({ op: 'room_state', room: ROOM });
   }
 
   renderMessage(msg);
@@ -752,6 +787,26 @@ function renderJobs() {
       <span class="job-id">${escapeHtml(job.id)}</span>
       <span class="job-msg">${escapeHtml(job.message)}</span>`;
     jobsEl.appendChild(div);
+  }
+}
+
+function renderTasks(tasks) {
+  if (!tasks || tasks.length === 0) {
+    tasksEl.innerHTML = '<span class="empty-state">No tasks</span>';
+    return;
+  }
+  tasksEl.innerHTML = '';
+  for (const task of tasks) {
+    const div = document.createElement('div');
+    div.className = 'task-item';
+    div.innerHTML = `
+      <div class="task-header">
+        <span class="task-status ${escapeHtml(task.status || 'todo')}">${escapeHtml(task.status || 'todo')}</span>
+        <span class="task-id">${escapeHtml(task.task_id || '?')}</span>
+        <span class="task-title">${escapeHtml(task.title || '')}</span>
+      </div>
+      <div class="task-meta">${escapeHtml(task.owner || '?')}</div>`;
+    tasksEl.appendChild(div);
   }
 }
 

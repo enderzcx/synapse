@@ -91,7 +91,33 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 | `channel_post(content, room)` | Post a message visible to all participants |
 | `channel_wait_new(room, timeout_s)` | Block until another participant posts (or timeout) |
 | `channel_history(room, limit, since_id)` | Fetch recent message history (incremental or full) |
-| `channel_state(room)` | Get room state snapshot: online agents, file claims, last message ID |
+| `channel_state(room)` | Get room state snapshot: online agents, file claims, tasks, last message ID |
+| `channel_peek_inbox(room)` | Non-blocking check for new messages (soft interrupt checkpoint) |
+| `channel_set_status(phase, task_id?, detail?)` | Report your current activity phase |
+
+### Control Plane
+
+| Tool | What it does |
+|------|-------------|
+| `channel_send_control(target, action)` | Send a control signal (interrupt/cancel) to a specific agent |
+| `channel_peek_control(room)` | Non-blocking check for incoming control signals |
+
+Message plane and control plane are fully separated. Control signals never mix with chat messages.
+
+### Task Protocol (anti-drift)
+
+| Tool | What it does |
+|------|-------------|
+| `channel_task_create(title, goal, owner, ...)` | Create a structured task with acceptance criteria |
+| `channel_task_update(task_id, status, ...)` | Update task status (with gate enforcement) |
+| `channel_task_get(task_id)` | Get task details including handoff/verdict history |
+| `channel_task_list(room, status?)` | List tasks, optionally filtered by status |
+| `channel_task_handoff(task_id, artifacts, verified, ...)` | Submit structured handoff, move task to review |
+| `channel_task_verdict(task_id, verdict, findings)` | Submit review verdict (pass/fail/needs_info) |
+
+Gate enforcement prevents AI drift:
+- `doing -> review` requires handoff first
+- `review -> done` requires passing verdict first
 
 ### File Claims (conflict prevention)
 
@@ -132,7 +158,7 @@ Git operations have per-command timeouts (10s/30s/60s) to prevent hangs. Commit 
 ## Tests
 
 ```bash
-uv run pytest -v    # 99 tests, ~10 seconds
+uv run pytest -v    # 129 tests, ~10 seconds
 ```
 
 ## Roadmap
@@ -142,7 +168,9 @@ uv run pytest -v    # 99 tests, ~10 seconds
 - [x] **Phase 2.1** -- File claims + git tools for conflict prevention
 - [x] **Phase 2.2** -- Async git jobs, subprocess timeouts, structured errors
 - [x] **Phase 2.3** -- Web viewer, history replay, state snapshot, claim TTL, session restore
-- [ ] **Phase 3** -- Agent status protocol, structured message types, task objects
+- [x] **Phase 2.4** -- Control plane, peek inbox (soft interrupt), task protocol
+- [x] **Phase 2.5** -- Anti-drift: task handoff, verdict, heartbeat, control gates
+- [ ] **Phase 3** -- Task persistence, cancel tokens, structured message types
 
 ## Acknowledgements
 
