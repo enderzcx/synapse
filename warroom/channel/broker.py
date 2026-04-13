@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from warroom.channel.db import fetch_history, fetch_since, insert_message
+from warroom.channel.db import fetch_history, fetch_mentions, fetch_since, insert_message
 from warroom.channel.protocol import FrameType, Message
 
 # Claim TTL: auto-release claims older than this (seconds)
@@ -62,6 +62,8 @@ class Broker:
         self._task_counter = 0
         # Agent status: {(room, actor): status_dict} — heartbeat/presence
         self.agent_status: dict[tuple[str, str], dict[str, Any]] = {}
+        # Last seen: {(room, actor): timestamp} — set on disconnect for offline mention tracking
+        self.last_seen: dict[tuple[str, str], float] = {}
 
     # --- top-level entry points ---
 
@@ -128,6 +130,8 @@ class Broker:
                 key = (room, state.actor)
                 if self.active_joins.get(key) is state:
                     del self.active_joins[key]
+                    # Record last_seen for offline mention tracking
+                    self.last_seen[key] = time.time()
             # Release all file claims owned by this actor in this room
             if state.actor is not None:
                 to_release = [
@@ -180,12 +184,21 @@ class Broker:
         # History replay: send recent messages on join
         recent = fetch_history(self._db, room, limit=50)
         recent_dicts = [m.to_dict() for m in recent]
+
+        # Offline mentions: messages that @actor or @all while agent was away
+        mentions_dicts: list[dict[str, Any]] = []
+        last_seen_ts = self.last_seen.get((room, actor))
+        if last_seen_ts is not None:
+            mentions = fetch_mentions(self._db, room, actor, last_seen_ts)
+            mentions_dicts = [m.to_dict() for m in mentions]
+
         await self._send(state, {
             "op": FrameType.JOINED,
             "reply_to_req_id": req_id,
             "room": room,
             "last_msg_id": last_msg_id,
             "recent_messages": recent_dicts,
+            "mentions": mentions_dicts,
             "is_reconnect": is_reconnect,
             "ok": True,
         })
@@ -757,15 +770,28 @@ class Broker:
             "messages": [m.to_dict() for m in msgs],
         })
 
+    def _compute_presence(self, room: str, actor: str) -> str:
+        """Compute agent presence: online, away, or offline."""
+        if (room, actor) not in self.active_joins:
+            return "offline"
+        status = self.agent_status.get((room, actor))
+        if status and time.time() - status.get("updated_at", 0) > 300:
+            return "away"
+        return "online"
+
     async def _on_room_state(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")
         room = frame.get("room", "room1")
 
-        # Active agents (with status if available)
+        # Active agents (with status and presence)
         active_agents = []
         for (r, actor), conn in self.active_joins.items():
             if r == room:
-                agent_info: dict[str, Any] = {"actor": actor, "client_id": conn.client_id}
+                agent_info: dict[str, Any] = {
+                    "actor": actor,
+                    "client_id": conn.client_id,
+                    "presence": self._compute_presence(room, actor),
+                }
                 status = self.agent_status.get((room, actor))
                 if status:
                     agent_info["phase"] = status["phase"]
@@ -773,6 +799,15 @@ class Broker:
                     agent_info["detail"] = status.get("detail", "")
                     agent_info["status_updated_at"] = status.get("updated_at")
                 active_agents.append(agent_info)
+
+        # Include recently seen offline agents
+        for (r, actor), seen_ts in self.last_seen.items():
+            if r == room and (room, actor) not in self.active_joins:
+                active_agents.append({
+                    "actor": actor,
+                    "presence": "offline",
+                    "last_seen": seen_ts,
+                })
 
         # File claims
         claims = [

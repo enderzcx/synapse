@@ -257,8 +257,8 @@ async def test_room_state_includes_active_agents_claims_and_last_msg_id(broker):
     assert resp["op"] == "room_state"
     assert resp["reply_to_req_id"] == "s1"
     assert resp["ok"] is True
-    assert {"actor": "claude", "client_id": "c1"} in resp["active_agents"]
-    assert {"actor": "codex", "client_id": "c2"} in resp["active_agents"]
+    assert any(a["actor"] == "claude" and a["client_id"] == "c1" for a in resp["active_agents"])
+    assert any(a["actor"] == "codex" and a["client_id"] == "c2" for a in resp["active_agents"])
     assert any(c["path"] == "auth.py" and c["actor"] == "claude" for c in resp["claims"])
     assert resp["last_msg_id"] == last_msg_id
 
@@ -880,3 +880,81 @@ async def test_gate_blocks_review_to_done_without_passing_verdict(broker):
     assert err["op"] == FrameType.ERROR
     assert err["code"] == "gate_blocked"
     assert "passing verdict" in err["message"]
+
+
+# --- offline mentions ---
+
+async def test_offline_mentions_returned_on_rejoin(broker):
+    """Agent disconnects, messages with @agent are posted, agent rejoins and sees mentions."""
+    ws_a = FakeWebSocket()
+    ws_b = FakeWebSocket()
+    state_a = await _join(broker, ws_a, actor="claude", client_id="c1", req_id="j1")
+    state_b = await _join(broker, ws_b, actor="codex", client_id="c2", req_id="j2")
+
+    # Claude disconnects
+    await broker.on_disconnect(state_a)
+
+    # Codex posts a message mentioning @claude
+    await broker.handle_frame(state_b, {
+        "op": FrameType.POST, "req_id": "p1", "room": "room1",
+        "content": "hey @claude please review this",
+    })
+    # And a message mentioning @all
+    await broker.handle_frame(state_b, {
+        "op": FrameType.POST, "req_id": "p2", "room": "room1",
+        "content": "@all standup time",
+    })
+    # And a message NOT mentioning claude
+    await broker.handle_frame(state_b, {
+        "op": FrameType.POST, "req_id": "p3", "room": "room1",
+        "content": "just talking to myself",
+    })
+
+    # Claude rejoins
+    ws_a2 = FakeWebSocket()
+    state_a2 = await _join(broker, ws_a2, actor="claude", client_id="c3", req_id="j3")
+    join_resp = ws_a2.sent[-1]
+
+    assert join_resp["op"] == FrameType.JOINED
+    assert "mentions" in join_resp
+    # Should have exactly 2 mentions (@claude and @all), not the third message
+    assert len(join_resp["mentions"]) == 2
+    mention_contents = [m["content"] for m in join_resp["mentions"]]
+    assert any("@claude" in c for c in mention_contents)
+    assert any("@all" in c for c in mention_contents)
+
+
+async def test_no_mentions_on_first_join(broker):
+    """First join should have empty mentions (no last_seen recorded yet)."""
+    ws = FakeWebSocket()
+    await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+    join_resp = ws.sent[-1]
+    assert join_resp["op"] == FrameType.JOINED
+    assert join_resp["mentions"] == []
+
+
+async def test_presence_in_room_state(broker):
+    """room_state should include presence field for each agent."""
+    ws_a = FakeWebSocket()
+    ws_b = FakeWebSocket()
+    state_a = await _join(broker, ws_a, actor="claude", client_id="c1", req_id="j1")
+    state_b = await _join(broker, ws_b, actor="codex", client_id="c2", req_id="j2")
+
+    await broker.handle_frame(state_a, {
+        "op": "room_state", "req_id": "s1", "room": "room1",
+    })
+    resp = ws_a.sent[-1]
+    agents = resp["active_agents"]
+    claude_info = next(a for a in agents if a["actor"] == "claude")
+    assert claude_info["presence"] == "online"
+
+    # Disconnect codex, check offline appears
+    await broker.on_disconnect(state_b)
+    await broker.handle_frame(state_a, {
+        "op": "room_state", "req_id": "s2", "room": "room1",
+    })
+    resp2 = ws_a.sent[-1]
+    agents2 = resp2["active_agents"]
+    codex_info = next(a for a in agents2 if a["actor"] == "codex")
+    assert codex_info["presence"] == "offline"
+    assert "last_seen" in codex_info

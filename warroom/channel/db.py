@@ -121,6 +121,29 @@ def fetch_history(
     return [_row_to_message(row) for row in cur.fetchall()]
 
 
+def fetch_mentions(
+    conn: sqlite3.Connection,
+    room: str,
+    actor: str,
+    since_ts: float,
+    limit: int = 50,
+) -> list[Message]:
+    """Fetch messages mentioning @actor or @all since a timestamp."""
+    cur = conn.execute(
+        """
+        SELECT id, ts, room, actor, client_id, role, parts, message_id, content, reply_to
+        FROM messages
+        WHERE room = ? AND ts >= ?
+          AND (content LIKE ? OR content LIKE '%@all%')
+          AND actor != ?
+        ORDER BY id ASC
+        LIMIT ?
+        """,
+        (room, since_ts, f"%@{actor}%", actor, limit),
+    )
+    return [_row_to_message(row) for row in cur.fetchall()]
+
+
 def _row_to_message(row: tuple) -> Message:
     parts_raw = row[6]
     try:
