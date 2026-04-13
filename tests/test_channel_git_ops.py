@@ -2,11 +2,22 @@
 
 import os
 import sys
+import asyncio
 
 import pytest
 
 from warroom.channel import git_ops
-from warroom.channel.git_ops import _run, commit_all, get_status
+from warroom.channel.git_ops import (
+    JOB_FAILED,
+    JOB_QUEUED,
+    JOB_RUNNING,
+    JOB_SUCCEEDED,
+    _run,
+    commit_all,
+    get_job_status,
+    get_status,
+    submit_commit_job,
+)
 
 
 @pytest.fixture
@@ -91,3 +102,66 @@ async def test_commit_all_commit_failure_reports_step(monkeypatch, git_repo):
     assert result["ok"] is False
     assert result["step"] == "commit"
     assert "timeout after 60s" in result["error"]
+
+
+async def test_get_job_status_unknown_job():
+    result = get_job_status("missing")
+    assert result["ok"] is False
+    assert "unknown job_id" in result["error"]
+
+
+async def test_submit_commit_job_succeeds(monkeypatch, git_repo):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_commit_all(message, cwd):
+        started.set()
+        await release.wait()
+        return {
+            "ok": True,
+            "commit": "abc123",
+            "branch": "main",
+            "files": ["new.py"],
+            "message": message,
+        }
+
+    monkeypatch.setattr(git_ops, "commit_all", fake_commit_all)
+
+    job_id = submit_commit_job("add new.py", git_repo)
+    first = get_job_status(job_id)
+    assert first["ok"] is True
+    assert first["job_id"] == job_id
+    assert first["status"] in {JOB_QUEUED, JOB_RUNNING}
+    assert first["result"] is None
+
+    await started.wait()
+    mid = get_job_status(job_id)
+    assert mid["status"] == JOB_RUNNING
+    assert mid["result"] is None
+
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    done = get_job_status(job_id)
+    assert done["status"] == JOB_SUCCEEDED
+    assert done["result"]["ok"] is True
+    assert done["result"]["commit"] == "abc123"
+
+
+async def test_submit_commit_job_failure(monkeypatch, git_repo):
+    async def fake_commit_all(message, cwd):
+        await asyncio.sleep(0)
+        return {"ok": False, "error": "boom", "step": "commit"}
+
+    monkeypatch.setattr(git_ops, "commit_all", fake_commit_all)
+
+    job_id = submit_commit_job("add new.py", git_repo)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    result = get_job_status(job_id)
+    assert result["ok"] is True
+    assert result["status"] == JOB_FAILED
+    assert result["result"]["ok"] is False
+    assert result["result"]["step"] == "commit"

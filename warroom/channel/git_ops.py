@@ -3,12 +3,18 @@
 Thin async wrappers around git subprocess calls. No branch isolation —
 all agents work on the same branch (AI Native: conflicts are resolved
 by AI, not prevented by branches).
+
+Layer 2: async job model — submit_commit_job() returns immediately with a
+job_id; the actual git work runs in a background task. Callers poll via
+get_job_status() or receive channel notifications on completion.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import uuid
+from typing import Any
 
 logger = logging.getLogger("a2a.channel.git_ops")
 
@@ -136,3 +142,71 @@ async def commit_all(message: str, cwd: str) -> dict:
         "files": files,
         "message": message,
     }
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: Async job model
+# ---------------------------------------------------------------------------
+
+JOB_QUEUED = "queued"
+JOB_RUNNING = "running"
+JOB_SUCCEEDED = "succeeded"
+JOB_FAILED = "failed"
+
+# In-memory job store — sufficient for local single-process use.
+_jobs: dict[str, dict[str, Any]] = {}
+
+
+def get_job_status(job_id: str) -> dict:
+    """Return current status of a commit job."""
+    job = _jobs.get(job_id)
+    if job is None:
+        return {"ok": False, "error": f"unknown job_id: {job_id}"}
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": job["status"],
+        "result": job.get("result"),
+    }
+
+
+async def _run_commit_job(job_id: str, message: str, cwd: str) -> None:
+    """Background task that executes commit_all and stores the result."""
+    job = _jobs[job_id]
+    job["status"] = JOB_RUNNING
+    try:
+        result = await commit_all(message=message, cwd=cwd)
+    except Exception as exc:
+        logger.exception("commit job %s crashed", job_id)
+        result = {"ok": False, "error": str(exc), "step": "unknown"}
+    job["result"] = result
+    job["status"] = JOB_SUCCEEDED if result.get("ok") else JOB_FAILED
+    # Fire completion callback if registered
+    cb = job.get("on_complete")
+    if cb is not None:
+        try:
+            await cb(job_id, result)
+        except Exception:
+            logger.exception("on_complete callback failed for job %s", job_id)
+
+
+def submit_commit_job(
+    message: str,
+    cwd: str,
+    on_complete: Any = None,
+) -> str:
+    """Submit a commit job that runs in the background.
+
+    Returns the job_id immediately. The caller can poll with
+    get_job_status(job_id) or provide an async on_complete(job_id, result)
+    callback that fires when the job finishes.
+    """
+    job_id = uuid.uuid4().hex[:8]
+    _jobs[job_id] = {
+        "status": JOB_QUEUED,
+        "message": message,
+        "result": None,
+        "on_complete": on_complete,
+    }
+    asyncio.get_event_loop().create_task(_run_commit_job(job_id, message, cwd))
+    return job_id

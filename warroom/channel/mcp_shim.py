@@ -161,13 +161,47 @@ async def git_status() -> dict:
 async def git_commit(message: str) -> dict:
     """Stage all changes and commit with the given message.
 
-    Call after finishing a task to save your work. Other agents and the user
-    can see your commits in git log.
+    NON-BLOCKING: returns immediately with a job_id. The commit runs in
+    the background. When it finishes, the result is posted to the channel
+    automatically. You can also check status with git_job_status(job_id).
 
-    Returns {"ok": true, "commit": "abc123", "files": ["app.py"], "message": "..."}.
+    Returns {"ok": true, "job_id": "abc123", "status": "queued"}.
     """
-    from warroom.channel.git_ops import commit_all
-    return await commit_all(message=message, cwd=_repo_root or os.getcwd())
+    from warroom.channel.git_ops import submit_commit_job
+
+    cwd = _repo_root or os.getcwd()
+
+    async def _notify_channel(job_id: str, result: dict) -> None:
+        """Post commit result back to the channel."""
+        try:
+            client = await _ensure_client()
+            if result.get("ok"):
+                text = (
+                    f"[git] commit `{result['commit']}` on `{result.get('branch', '?')}` "
+                    f"— {len(result.get('files', []))} file(s): {result['message']}"
+                )
+            else:
+                step = result.get("step", "?")
+                text = f"[git] commit failed at step `{step}`: {result.get('error', 'unknown')}"
+            await client.post("room1", content=text)
+        except Exception:
+            pass  # best-effort notification
+
+    job_id = submit_commit_job(
+        message=message, cwd=cwd, on_complete=_notify_channel
+    )
+    return {"ok": True, "job_id": job_id, "status": "queued"}
+
+
+@mcp.tool()
+async def git_job_status(job_id: str) -> dict:
+    """Check the status of a background git commit job.
+
+    Returns {"ok": true, "job_id": "...", "status": "queued|running|succeeded|failed", "result": {...}}.
+    If the job_id is unknown, returns {"ok": false, "error": "unknown job_id: ..."}.
+    """
+    from warroom.channel.git_ops import get_job_status
+    return get_job_status(job_id)
 
 
 @mcp.tool()
