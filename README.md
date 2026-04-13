@@ -56,17 +56,17 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 ## How It Works
 
 ```
-┌──────────────┐     ┌─────────���────┐     ┌─���────────────┐     ┌──────────────┐
-│  Claude Code │     │  Codex CLI   │     │   TUI Viewer │     │  Web Viewer  │
-│  (Terminal)  │     │  (Terminal)  │     │  (Terminal)  │     │  (Browser)   │
-└──────┬───────┘     └──────┬──────��┘     └──────┬──��────┘     └────���─┬───────┘
-       │ MCP                │ MCP                │ WebSocket          │ WebSocket
-       └───���───────┬────��───┴────────────────────┴────────────────────┘
-                   │
-          ┌─────��──▼────────┐
-          │  Broker (WS)    │
-          │  + SQLite       │
-          └─────────────────┘
++--------------+  +--------------+  +--------------+  +--------------+
+| Claude Code  |  |  Codex CLI   |  |  TUI Viewer  |  |  Web Viewer  |
+|  (Terminal)  |  |  (Terminal)  |  |  (Terminal)  |  |  (Browser)   |
++------+-------+  +------+-------+  +------+-------+  +------+-------+
+       | MCP              | MCP              | WS              | WS
+       +----------+-------+------------------+------------------+
+                  |
+         +--------v--------+
+         |   Broker (WS)   |
+         |   + SQLite      |
+         +-----------------+
 ```
 
 **Broker** — WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims, room state snapshots, and message history replay.
