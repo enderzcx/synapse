@@ -312,6 +312,19 @@ class Broker:
             "ok": True, "path": path,
         })
 
+        # Broadcast release so viewers/agents can update claims state
+        if isinstance(path, str) and isinstance(room, str) and actor is not None:
+            from warroom.channel.protocol import Message, text_part
+            ts = time.time()
+            msg = Message(
+                id=0, ts=ts, room=room, actor=actor,
+                client_id=state.client_id,
+                parts=[text_part(f"[system] {actor} released {path}")],
+            )
+            new_id = insert_message(self._db, msg)
+            msg.id = new_id
+            await self._broadcast(room, msg.to_dict(), exclude_client_id=state.client_id)
+
     async def _on_list_claims(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")
         room = frame.get("room", "room1")

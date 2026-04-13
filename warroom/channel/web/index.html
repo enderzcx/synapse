@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Synapse Channel Viewer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-surface: #161b22;
+    --bg-hover: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent-claude: #58a6ff;
+    --accent-codex: #bc8cff;
+    --accent-user: #ffa657;
+    --accent-system: #3fb950;
+    --accent-error: #f85149;
+    --accent-success: #3fb950;
+    --accent-pending: #d29922;
+    --radius: 8px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Layout */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    grid-template-rows: 48px 1fr auto;
+    height: 100vh;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  /* Header */
+  .header {
+    grid-column: 1 / -1;
+    background: var(--bg-surface);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .header .room-tag {
+    font-size: 12px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: var(--text-dim);
+  }
+  .header .conn-status {
+    margin-left: auto;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .conn-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-error);
+    transition: background 0.3s;
+  }
+  .conn-dot.connected { background: var(--accent-success); }
+
+  /* Message stream */
+  .messages-panel {
+    grid-column: 1;
+    grid-row: 2;
+    background: var(--bg);
+    overflow-y: auto;
+    padding: 12px 16px;
+    scroll-behavior: smooth;
+  }
+  .messages-panel::-webkit-scrollbar { width: 6px; }
+  .messages-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .msg {
+    margin-bottom: 8px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border-left: 3px solid transparent;
+    background: var(--bg-surface);
+    transition: background 0.15s;
+  }
+  .msg:hover { background: var(--bg-hover); }
+  .msg.actor-claude { border-left-color: var(--accent-claude); }
+  .msg.actor-codex { border-left-color: var(--accent-codex); }
+  .msg.actor-user { border-left-color: var(--accent-user); }
+  .msg.actor-system { border-left-color: var(--accent-system); background: transparent; padding: 4px 14px; }
+
+  .msg-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .msg-actor {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .msg-actor.claude { color: var(--accent-claude); }
+  .msg-actor.codex { color: var(--accent-codex); }
+  .msg-actor.user { color: var(--accent-user); }
+  .msg-actor.system { color: var(--accent-system); }
+  .msg-time {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .msg-body {
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-wrap: break-word;
+  }
+  .msg-body p { margin-bottom: 8px; }
+  .msg-body p:last-child { margin-bottom: 0; }
+  .msg-body pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+  .msg-body code {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+  }
+  .msg-body :not(pre) > code {
+    background: var(--bg-hover);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .msg-body ul, .msg-body ol { padding-left: 20px; margin: 6px 0; }
+  .msg-body li { margin: 3px 0; }
+  .msg-body table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  .msg-body th, .msg-body td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 13px;
+  }
+  .msg-body th { background: var(--bg-hover); font-weight: 600; }
+  .msg-body strong { font-weight: 600; }
+  .msg-body h1, .msg-body h2, .msg-body h3 {
+    margin: 12px 0 6px 0;
+    font-weight: 600;
+  }
+  .msg-body h2 { font-size: 15px; }
+  .msg-body h3 { font-size: 14px; }
+  .msg-body blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    color: var(--text-dim);
+    margin: 8px 0;
+  }
+  .msg-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+  .msg.actor-system .msg-body {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    background: var(--bg-surface);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-section {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  /* Agent list */
+  .agent-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  .agent-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .agent-dot.online { background: var(--accent-success); }
+  .agent-dot.offline { background: var(--border); }
+  .agent-name { font-weight: 500; }
+  .agent-status { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+
+  /* File claims */
+  .claim-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 12px;
+  }
+  .claim-icon { color: var(--accent-pending); font-size: 14px; }
+  .claim-path {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .claim-actor { color: var(--text-dim); font-size: 11px; margin-left: auto; flex-shrink: 0; }
+
+  /* Git jobs */
+  .job-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+  .job-status-icon { font-size: 14px; }
+  .job-status-icon.queued { color: var(--text-dim); }
+  .job-status-icon.running { color: var(--accent-pending); }
+  .job-status-icon.succeeded { color: var(--accent-success); }
+  .job-status-icon.failed { color: var(--accent-error); }
+  .job-id {
+    font-family: monospace;
+    color: var(--text-dim);
+  }
+  .job-msg {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .empty-state {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* Input bar */
+  .input-bar {
+    grid-column: 1;
+    grid-row: 3;
+    background: var(--bg-surface);
+    padding: 10px 16px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .input-bar textarea {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 8px 12px;
+    resize: none;
+    min-height: 38px;
+    max-height: 120px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .input-bar textarea:focus { border-color: var(--accent-claude); }
+  .input-bar textarea::placeholder { color: var(--text-dim); }
+  .input-bar button {
+    background: var(--accent-claude);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  .input-bar button:hover { opacity: 0.85; }
+  .input-bar button:disabled { opacity: 0.4; cursor: default; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>Synapse</h1>
+    <span class="room-tag" id="room-tag">room1</span>
+    <div class="conn-status">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-text">Disconnected</span>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="messages-panel" id="messages"></div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Agents</div>
+      <div id="agents-list"><span class="empty-state">No agents online</span></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">File Claims</div>
+      <div id="claims-list"><span class="empty-state">No active claims</span></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Git Jobs</div>
+      <div id="jobs-list"><span class="empty-state">No recent jobs</span></div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-bar">
+    <textarea id="msg-input" placeholder="Type a message..." rows="1"></textarea>
+    <button id="send-btn" disabled>Send</button>
+  </div>
+</div>
+
+<script>
+// --- Config ---
+const BROKER_URL = new URLSearchParams(location.search).get('broker') || 'ws://127.0.0.1:9100';
+const ROOM = new URLSearchParams(location.search).get('room') || 'room1';
+const ACTOR = 'web-viewer';
+const CLIENT_ID = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+
+// --- State ---
+let ws = null;
+let reqCounter = 0;
+let joined = false;
+const agents = new Map();   // actor -> {online, lastSeen, status}
+const claims = new Map();   // path -> actor
+const gitJobs = [];          // [{id, status, message}]
+const pendingMessages = new Map(); // reqId -> {content}
+const AGENT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// --- Marked config ---
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+  highlight: function(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  }
+});
+
+// --- DOM refs ---
+const messagesEl = document.getElementById('messages');
+const agentsEl = document.getElementById('agents-list');
+const claimsEl = document.getElementById('claims-list');
+const jobsEl = document.getElementById('jobs-list');
+const inputEl = document.getElementById('msg-input');
+const sendBtn = document.getElementById('send-btn');
+const connDot = document.getElementById('conn-dot');
+const connText = document.getElementById('conn-text');
+const roomTag = document.getElementById('room-tag');
+
+roomTag.textContent = ROOM;
+
+// --- WebSocket ---
+function connect() {
+  ws = new WebSocket(BROKER_URL);
+
+  ws.onopen = () => {
+    setConnStatus(true);
+    sendFrame({
+      op: 'join',
+      room: ROOM,
+      actor: ACTOR,
+      client_id: CLIENT_ID,
+    });
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const frame = JSON.parse(e.data);
+      handleFrame(frame);
+    } catch (err) {
+      console.error('Bad frame:', err);
+    }
+  };
+
+  ws.onclose = () => {
+    setConnStatus(false);
+    joined = false;
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function sendFrame(frame) {
+  if (!frame.req_id) {
+    frame.req_id = `web-${++reqCounter}`;
+  }
+  ws.send(JSON.stringify(frame));
+  return frame.req_id;
+}
+
+function setConnStatus(ok) {
+  connDot.classList.toggle('connected', ok);
+  connText.textContent = ok ? 'Connected' : 'Disconnected';
+  sendBtn.disabled = !ok;
+}
+
+// --- Frame handling ---
+function handleFrame(frame) {
+  const reqId = frame.reply_to_req_id;
+
+  switch (frame.op) {
+    case 'joined':
+      joined = true;
+      // Request current claims snapshot
+      sendFrame({ op: 'list_claims', room: ROOM });
+      break;
+
+    case 'posted':
+      // Ack received — render the pending message now
+      if (reqId && pendingMessages.has(reqId)) {
+        const pending = pendingMessages.get(reqId);
+        pendingMessages.delete(reqId);
+        renderMessage({
+          actor: ACTOR,
+          content: pending.content,
+          ts: frame.ts || Date.now() / 1000,
+        });
+      }
+      break;
+
+    case 'claims_list':
+      // Initial snapshot of file claims
+      if (frame.ok && Array.isArray(frame.claims)) {
+        claims.clear();
+        for (const c of frame.claims) {
+          claims.set(c.path, c.actor);
+        }
+        renderClaims();
+      }
+      break;
+
+    case 'broadcast':
+      if (frame.msg) handleMessage(frame.msg);
+      break;
+
+    case 'error':
+      console.error('Broker error:', frame.message);
+      // If a pending send failed, show error
+      if (reqId && pendingMessages.has(reqId)) {
+        const pending = pendingMessages.get(reqId);
+        pendingMessages.delete(reqId);
+        renderMessage({
+          actor: 'system',
+          content: `[system] send failed: ${frame.message}`,
+          ts: Date.now() / 1000,
+        });
+      }
+      break;
+  }
+}
+
+function handleMessage(msg) {
+  const content = msg.content || '';
+  const actor = msg.actor || '?';
+
+  // Any message from an agent refreshes their presence
+  if (actor !== ACTOR && actor !== '?') {
+    const existing = agents.get(actor);
+    if (existing) {
+      existing.lastSeen = Date.now();
+      existing.online = true;
+    } else {
+      setAgent(actor, true, 'active');
+    }
+    renderAgents();
+  }
+
+  // Track agent presence from system messages
+  if (content.startsWith('[system]')) {
+    parseSystemMessage(content, actor);
+  }
+
+  // Track git job notifications
+  if (content.startsWith('[git]')) {
+    parseGitNotification(content);
+  }
+
+  renderMessage(msg);
+}
+
+function parseSystemMessage(content, actor) {
+  const text = content.replace('[system] ', '');
+
+  // "actor joined room"
+  const joinMatch = text.match(/^(\w+) joined (\w+)/);
+  if (joinMatch) {
+    setAgent(joinMatch[1], true, 'joined');
+    return;
+  }
+
+  // "actor listening"
+  const listenMatch = text.match(/^(\w+) listening/);
+  if (listenMatch) {
+    setAgent(listenMatch[1], true, 'listening');
+    return;
+  }
+
+  // "actor claimed path"
+  const claimMatch = text.match(/^(\w+) claimed (.+)/);
+  if (claimMatch) {
+    claims.set(claimMatch[2], claimMatch[1]);
+    renderClaims();
+    return;
+  }
+
+  // "actor released path" (if we ever broadcast this)
+  const releaseMatch = text.match(/^(\w+) released (.+)/);
+  if (releaseMatch) {
+    claims.delete(releaseMatch[2]);
+    renderClaims();
+    return;
+  }
+}
+
+function parseGitNotification(content) {
+  const text = content.replace('[git] ', '');
+
+  // "commit `abc123` on `main` -- N file(s): message"
+  const successMatch = text.match(/commit `(\w+)` on `(\w+)`/);
+  if (successMatch) {
+    gitJobs.unshift({
+      id: successMatch[1],
+      status: 'succeeded',
+      message: text.split(': ').slice(1).join(': ') || successMatch[1],
+    });
+    if (gitJobs.length > 10) gitJobs.pop();
+    renderJobs();
+    return;
+  }
+
+  // "commit failed at step `X`: error"
+  const failMatch = text.match(/commit failed at step `(\w+)`: (.+)/);
+  if (failMatch) {
+    gitJobs.unshift({
+      id: failMatch[1],
+      status: 'failed',
+      message: failMatch[2],
+    });
+    if (gitJobs.length > 10) gitJobs.pop();
+    renderJobs();
+    return;
+  }
+}
+
+// --- Agent tracking ---
+function setAgent(name, online, status) {
+  if (name === ACTOR) return; // don't track ourselves
+  agents.set(name, { online, lastSeen: Date.now(), status });
+  renderAgents();
+}
+
+// Check agent TTL every 30s — mark stale agents as offline
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const [name, info] of agents) {
+    if (info.online && (now - info.lastSeen) > AGENT_TTL_MS) {
+      info.online = false;
+      info.status = 'inactive';
+      changed = true;
+    }
+  }
+  if (changed) renderAgents();
+}, 30000);
+
+// --- Rendering ---
+function renderMessage(msg) {
+  const content = msg.content || '';
+  const actor = msg.actor || '?';
+  const ts = msg.ts ? new Date(msg.ts * 1000) : new Date();
+  const timeStr = ts.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const isSystem = content.startsWith('[system]');
+  const actorClass = isSystem ? 'system' : actor.toLowerCase();
+
+  const el = document.createElement('div');
+  el.className = `msg actor-${actorClass}`;
+
+  if (isSystem) {
+    el.innerHTML = `
+      <div class="msg-body">
+        <span class="msg-time">${timeStr}</span>
+        ${escapeHtml(content)}
+      </div>`;
+  } else {
+    // Render markdown
+    let rendered;
+    try {
+      rendered = marked.parse(content);
+    } catch (e) {
+      rendered = escapeHtml(content);
+    }
+
+    el.innerHTML = `
+      <div class="msg-header">
+        <span class="msg-actor ${actorClass}">${escapeHtml(actor)}</span>
+        <span class="msg-time">${timeStr}</span>
+      </div>
+      <div class="msg-body">${rendered}</div>`;
+
+    // Highlight code blocks
+    el.querySelectorAll('pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+  }
+
+  // Check scroll position BEFORE appending
+  const isNearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 150;
+
+  messagesEl.appendChild(el);
+
+  if (isNearBottom) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+
+function renderAgents() {
+  if (agents.size === 0) {
+    agentsEl.innerHTML = '<span class="empty-state">No agents online</span>';
+    return;
+  }
+  agentsEl.innerHTML = '';
+  for (const [name, info] of agents) {
+    const colorMap = { claude: 'var(--accent-claude)', codex: 'var(--accent-codex)', user: 'var(--accent-user)' };
+    const dotColor = colorMap[name.toLowerCase()] || 'var(--accent-success)';
+    const div = document.createElement('div');
+    div.className = 'agent-item';
+    div.innerHTML = `
+      <div class="agent-dot ${info.online ? 'online' : 'offline'}" style="${info.online ? `background:${dotColor}` : ''}"></div>
+      <span class="agent-name">${escapeHtml(name)}</span>
+      <span class="agent-status">${escapeHtml(info.status || '')}</span>`;
+    agentsEl.appendChild(div);
+  }
+}
+
+function renderClaims() {
+  if (claims.size === 0) {
+    claimsEl.innerHTML = '<span class="empty-state">No active claims</span>';
+    return;
+  }
+  claimsEl.innerHTML = '';
+  for (const [path, actor] of claims) {
+    const div = document.createElement('div');
+    div.className = 'claim-item';
+    div.innerHTML = `
+      <span class="claim-icon">&#128274;</span>
+      <span class="claim-path" title="${escapeHtml(path)}">${escapeHtml(path)}</span>
+      <span class="claim-actor">${escapeHtml(actor)}</span>`;
+    claimsEl.appendChild(div);
+  }
+}
+
+function renderJobs() {
+  if (gitJobs.length === 0) {
+    jobsEl.innerHTML = '<span class="empty-state">No recent jobs</span>';
+    return;
+  }
+  jobsEl.innerHTML = '';
+  const icons = { queued: '&#9711;', running: '&#9881;', succeeded: '&#10003;', failed: '&#10007;' };
+  for (const job of gitJobs) {
+    const div = document.createElement('div');
+    div.className = 'job-item';
+    div.innerHTML = `
+      <span class="job-status-icon ${job.status}">${icons[job.status] || '?'}</span>
+      <span class="job-id">${escapeHtml(job.id)}</span>
+      <span class="job-msg">${escapeHtml(job.message)}</span>`;
+    jobsEl.appendChild(div);
+  }
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// --- Input ---
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+});
+
+sendBtn.addEventListener('click', sendMessage);
+
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text || !joined) return;
+
+  const reqId = sendFrame({
+    op: 'post',
+    room: ROOM,
+    content: text,
+  });
+
+  // Don't render yet — wait for broker ack (posted frame)
+  pendingMessages.set(reqId, { content: text });
+
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+}
+
+// --- Init ---
+connect();
+</script>
+</body>
+</html>
