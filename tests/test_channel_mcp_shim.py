@@ -39,6 +39,24 @@ async def test_git_job_status_forwards(monkeypatch):
     assert result["result"]["commit"] == "abc123"
 
 
+async def test_channel_wait_new_clamps_requested_timeout(monkeypatch):
+    class FakeClient:
+        async def wait_new(self, room, timeout_s):
+            assert room == "room1"
+            assert timeout_s == 60.0
+            return None
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+    monkeypatch.setattr(mcp_shim, "_listening_announced", {"room1": True})
+    monkeypatch.setattr(mcp_shim, "MAX_WAIT_TIMEOUT_S", 60.0)
+
+    result = await mcp_shim.channel_wait_new(room="room1", timeout_s=300.0)
+    assert result == {"ok": True, "timed_out": True}
+
+
 async def test_channel_history_forwards(monkeypatch):
     class FakeClient:
         async def _request(self, op, **kwargs):

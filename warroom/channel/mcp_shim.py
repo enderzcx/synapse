@@ -49,8 +49,24 @@ _listening_announced: dict[str, bool] = {}  # room -> bool
 # Phase B probe result: Codex CLI hard limit = 120s, safe = 109s.
 # We default to 60s for faster channel response; can raise up to ~100s.
 DEFAULT_TIMEOUT_S = 60.0
+# Keep individual wait_new tool calls below host-side hard limits.
+MAX_WAIT_TIMEOUT_S = 60.0
 
 mcp = FastMCP("channel")
+
+
+def _effective_wait_timeout(requested_s: float) -> float:
+    """Clamp wait_new to a host-safe timeout window."""
+    if requested_s <= 0:
+        return 0.0
+    if requested_s > MAX_WAIT_TIMEOUT_S:
+        logger.warning(
+            "channel_wait_new requested %.1fs, clamping to %.1fs",
+            requested_s,
+            MAX_WAIT_TIMEOUT_S,
+        )
+        return MAX_WAIT_TIMEOUT_S
+    return requested_s
 
 
 async def _ensure_client() -> ChannelClient:
@@ -132,6 +148,7 @@ async def channel_wait_new(
         when timeout expires with no new messages — call again.
     """
     client = await _ensure_client()
+    effective_timeout_s = _effective_wait_timeout(timeout_s)
     # v4 two-phase bootstrap: announce "listening" on FIRST wait_new call
     if not _listening_announced.get(room, False):
         _listening_announced[room] = True
@@ -141,7 +158,7 @@ async def channel_wait_new(
             pass  # non-fatal
 
     try:
-        msg = await client.wait_new(room, timeout_s=timeout_s)
+        msg = await client.wait_new(room, timeout_s=effective_timeout_s)
     except ConnectionError as e:
         return {"ok": False, "error": str(e)}
 
