@@ -320,6 +320,64 @@ async def test_unknown_op_returns_error(broker):
     assert err["reply_to_req_id"] == "rx"
 
 
+async def test_control_routes_to_target_and_acks_sender(broker):
+    ws_sender = FakeWebSocket()
+    state_sender = await _join(
+        broker, ws_sender, actor="claude", client_id="c1", req_id="j1"
+    )
+    ws_target = FakeWebSocket()
+    await _join(broker, ws_target, actor="codex", client_id="c2", req_id="j2")
+
+    await broker.handle_frame(state_sender, {
+        "op": FrameType.CONTROL,
+        "req_id": "ctl1",
+        "room": "room1",
+        "target": "codex",
+        "action": "interrupt",
+        "task_id": "task-1",
+        "data": {"reason": "user_override"},
+    })
+
+    ack = ws_sender.sent[-1]
+    assert ack["op"] == FrameType.CONTROL_ACK
+    assert ack["reply_to_req_id"] == "ctl1"
+    assert ack["ok"] is True
+    assert ack["target"] == "codex"
+    assert ack["action"] == "interrupt"
+    assert ack["task_id"] == "task-1"
+
+    delivered = ws_target.sent[-1]
+    assert delivered["op"] == FrameType.CONTROL
+    assert delivered["room"] == "room1"
+    assert delivered["target"] == "codex"
+    assert delivered["action"] == "interrupt"
+    assert delivered["task_id"] == "task-1"
+    assert delivered["data"] == {"reason": "user_override"}
+    assert delivered["from_actor"] == "claude"
+
+
+async def test_control_ack_reports_missing_target(broker):
+    ws_sender = FakeWebSocket()
+    state_sender = await _join(
+        broker, ws_sender, actor="claude", client_id="c1", req_id="j1"
+    )
+
+    await broker.handle_frame(state_sender, {
+        "op": FrameType.CONTROL,
+        "req_id": "ctl1",
+        "room": "room1",
+        "target": "codex",
+        "action": "interrupt",
+    })
+
+    ack = ws_sender.sent[-1]
+    assert ack["op"] == FrameType.CONTROL_ACK
+    assert ack["reply_to_req_id"] == "ctl1"
+    assert ack["ok"] is False
+    assert ack["code"] == "target_not_found"
+    assert "target 'codex'" in ack["message"]
+
+
 # --- v5 regression tests for codex review round 4 findings ---
 
 async def test_session_restore_then_stale_disconnect(broker):

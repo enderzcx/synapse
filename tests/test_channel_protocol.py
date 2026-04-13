@@ -126,6 +126,26 @@ def test_error_response_decode():
     assert f.message == "claude already joined room1"
 
 
+def test_control_frame_round_trip():
+    raw = json.dumps({
+        "op": "control",
+        "room": "room1",
+        "target": "codex",
+        "action": "interrupt",
+        "task_id": "task-1",
+        "data": {"reason": "user_override"},
+        "from_actor": "claude",
+    })
+    f = decode_frame(raw)
+    assert f.op == "control"
+    assert f.room == "room1"
+    assert f.target == "codex"
+    assert f.action == "interrupt"
+    assert f.task_id == "task-1"
+    assert f.data == {"reason": "user_override"}
+    assert f.from_actor == "claude"
+
+
 # --- Broadcast frame (server → client, NO reply_to_req_id) ---
 
 def test_broadcast_frame_decode():
@@ -167,7 +187,9 @@ def test_frame_type_enum_has_expected_values():
     # sanity: known ops can be identified
     assert FrameType.JOIN == "join"
     assert FrameType.POST == "post"
+    assert FrameType.CONTROL == "control"
     assert FrameType.JOINED == "joined"
     assert FrameType.POSTED == "posted"
+    assert FrameType.CONTROL_ACK == "control_ack"
     assert FrameType.BROADCAST == "broadcast"
     assert FrameType.ERROR == "error"

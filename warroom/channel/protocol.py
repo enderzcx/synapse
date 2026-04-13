@@ -31,11 +31,13 @@ class FrameType:
     JOIN = "join"
     POST = "post"
     PING = "ping"
+    CONTROL = "control"
 
     # Server → Client (response, carries reply_to_req_id)
     JOINED = "joined"
     POSTED = "posted"
     PONG = "pong"
+    CONTROL_ACK = "control_ack"
     ERROR = "error"
 
     # Server → Client (unsolicited)
@@ -187,6 +189,13 @@ class Frame:
     msg_id: int | None = None
     ts: float | None = None
     ok: bool | None = None
+
+    # control
+    target: str | None = None
+    action: str | None = None
+    task_id: str | None = None
+    data: Any | None = None
+    from_actor: str | None = None
 
     # broadcast
     msg: dict[str, Any] | None = None

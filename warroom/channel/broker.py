@@ -66,6 +66,8 @@ class Broker:
             await self._on_join(state, frame)
         elif op == FrameType.POST:
             await self._on_post(state, frame)
+        elif op == FrameType.CONTROL:
+            await self._on_control(state, frame)
         elif op == "claim_file":
             await self._on_claim_file(state, frame)
         elif op == "release_file":
@@ -237,6 +239,71 @@ class Broker:
 
         # Broadcast to all room subscribers EXCEPT poster (by client_id)
         await self._broadcast(room, msg.to_dict(), exclude_client_id=client_id)
+
+    async def _on_control(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room")
+        target = frame.get("target")
+        action = frame.get("action")
+        task_id = frame.get("task_id")
+        data = frame.get("data")
+        sender = state.actor
+
+        if not (
+            isinstance(room, str)
+            and isinstance(target, str)
+            and isinstance(action, str)
+        ):
+            await self._send(state, {
+                "op": FrameType.ERROR,
+                "reply_to_req_id": req_id,
+                "code": "bad_request",
+                "message": "control requires string room, target, action",
+            })
+            return
+
+        if sender is None or room not in state.joined_rooms:
+            await self._send(state, {
+                "op": FrameType.ERROR,
+                "reply_to_req_id": req_id,
+                "code": "not_joined",
+                "message": f"must join {room!r} before sending control",
+            })
+            return
+
+        recipient = self.active_joins.get((room, target))
+        if recipient is None:
+            await self._send(state, {
+                "op": FrameType.CONTROL_ACK,
+                "reply_to_req_id": req_id,
+                "ok": False,
+                "room": room,
+                "target": target,
+                "action": action,
+                "task_id": task_id if isinstance(task_id, str) else None,
+                "code": "target_not_found",
+                "message": f"target {target!r} is not joined in {room!r}",
+            })
+            return
+
+        await self._send(state, {
+            "op": FrameType.CONTROL_ACK,
+            "reply_to_req_id": req_id,
+            "ok": True,
+            "room": room,
+            "target": target,
+            "action": action,
+            "task_id": task_id if isinstance(task_id, str) else None,
+        })
+        await self._send(recipient, {
+            "op": FrameType.CONTROL,
+            "room": room,
+            "target": target,
+            "action": action,
+            "task_id": task_id if isinstance(task_id, str) else None,
+            "data": data,
+            "from_actor": sender,
+        })
 
     # --- file claims ---
 
