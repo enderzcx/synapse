@@ -333,4 +333,8 @@ class ChannelClient:
             msg_room = msg.get("room")
             if msg_room is not None and msg_room != room:
                 continue
+            # Filter status broadcasts — these are for viewer only,
+            # not for agent message processing loops.
+            if msg.get("op") == "agent_status_broadcast":
+                continue
             return msg
