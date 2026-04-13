@@ -85,6 +85,10 @@ class Broker:
             await self._on_task_get(state, frame)
         elif op == "task_list":
             await self._on_task_list(state, frame)
+        elif op == "task_handoff":
+            await self._on_task_handoff(state, frame)
+        elif op == "task_verdict":
+            await self._on_task_verdict(state, frame)
         elif op == "history":
             await self._on_history(state, frame)
         elif op == "room_state":
@@ -563,6 +567,113 @@ class Broker:
             "op": "task_list_result", "reply_to_req_id": req_id,
             "ok": True, "tasks": tasks, "count": len(tasks),
         })
+
+    async def _on_task_handoff(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        task_id = frame.get("task_id")
+
+        task = self.tasks.get((room, task_id)) if isinstance(task_id, str) else None
+        if task is None:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_found", "message": f"task {task_id!r} not found",
+            })
+            return
+
+        handoff = {
+            "from": state.actor or "unknown",
+            "artifacts": frame.get("artifacts", []),
+            "verified": frame.get("verified", []),
+            "assumptions": frame.get("assumptions", []),
+            "next_action": frame.get("next_action", ""),
+            "ts": time.time(),
+        }
+        task["last_handoff"] = handoff
+        task["status"] = "review"
+        task["updated_at"] = time.time()
+
+        await self._send(state, {
+            "op": "task_handoff_ack", "reply_to_req_id": req_id,
+            "ok": True, "task_id": task_id, "status": "review",
+        })
+
+        # Broadcast handoff notification
+        from warroom.channel.protocol import text_part
+        actor = state.actor or "unknown"
+        msg = Message(
+            id=0, ts=time.time(), room=room, actor=actor,
+            client_id=state.client_id,
+            parts=[text_part(
+                f"[task] {actor} handed off {task_id}: "
+                f"{', '.join(handoff['artifacts'][:3]) or 'no artifacts'}"
+                f" -> review by {task.get('reviewer', '?')}"
+            )],
+        )
+        new_id = insert_message(self._db, msg)
+        msg.id = new_id
+        await self._broadcast(room, msg.to_dict(), exclude_client_id=state.client_id)
+
+    async def _on_task_verdict(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        task_id = frame.get("task_id")
+        verdict = frame.get("verdict")
+
+        task = self.tasks.get((room, task_id)) if isinstance(task_id, str) else None
+        if task is None:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_found", "message": f"task {task_id!r} not found",
+            })
+            return
+
+        if verdict not in ("pass", "fail", "needs_info"):
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "bad_request",
+                "message": f"verdict must be pass|fail|needs_info, got {verdict!r}",
+            })
+            return
+
+        verdict_obj = {
+            "by": state.actor or "unknown",
+            "verdict": verdict,
+            "findings": frame.get("findings", []),
+            "blocking": frame.get("blocking", verdict == "fail"),
+            "ts": time.time(),
+        }
+        task["last_verdict"] = verdict_obj
+        task["updated_at"] = time.time()
+
+        # Status transition based on verdict
+        if verdict == "pass":
+            task["status"] = "done"
+        elif verdict == "fail":
+            task["status"] = "doing"
+        elif verdict == "needs_info":
+            task["status"] = "blocked"
+
+        await self._send(state, {
+            "op": "task_verdict_ack", "reply_to_req_id": req_id,
+            "ok": True, "task_id": task_id,
+            "verdict": verdict, "new_status": task["status"],
+        })
+
+        # Broadcast verdict notification
+        from warroom.channel.protocol import text_part
+        reviewer = state.actor or "unknown"
+        msg = Message(
+            id=0, ts=time.time(), room=room, actor=reviewer,
+            client_id=state.client_id,
+            parts=[text_part(
+                f"[task] {reviewer} verdict on {task_id}: {verdict}"
+                f"{' -- ' + '; '.join(verdict_obj['findings'][:3]) if verdict_obj['findings'] else ''}"
+            )],
+        )
+        new_id = insert_message(self._db, msg)
+        msg.id = new_id
+        await self._broadcast(room, msg.to_dict(), exclude_client_id=state.client_id)
 
     async def _on_history(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")

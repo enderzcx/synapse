@@ -394,6 +394,59 @@ async def channel_task_list(room: str = "room1", status: str | None = None) -> d
 
 
 @mcp.tool()
+async def channel_task_handoff(
+    task_id: str,
+    artifacts: list[str] | None = None,
+    verified: list[str] | None = None,
+    assumptions: list[str] | None = None,
+    next_action: str = "",
+    room: str = "room1",
+) -> dict:
+    """Submit a structured handoff for a task, moving it to review.
+
+    USE when you finish working on a task. Explicitly state what you did,
+    what you verified, and what assumptions remain. This prevents state
+    drift between agents.
+
+    Returns {"ok": true, "task_id": "...", "status": "review"}.
+    """
+    client = await _ensure_client()
+    return await client._request(
+        "task_handoff", room=room, task_id=task_id,
+        artifacts=artifacts or [], verified=verified or [],
+        assumptions=assumptions or [], next_action=next_action,
+    )
+
+
+@mcp.tool()
+async def channel_task_verdict(
+    task_id: str,
+    verdict: str,
+    findings: list[str] | None = None,
+    blocking: bool | None = None,
+    room: str = "room1",
+) -> dict:
+    """Submit a review verdict on a task.
+
+    verdict must be: "pass" (task done), "fail" (send back to doing),
+    or "needs_info" (blocked, need clarification).
+
+    USE as a reviewer to give a structured decision, not a free-text
+    chat message. This prevents decision drift.
+
+    Returns {"ok": true, "task_id": "...", "verdict": "...", "new_status": "..."}.
+    """
+    client = await _ensure_client()
+    kwargs: dict = {
+        "room": room, "task_id": task_id, "verdict": verdict,
+        "findings": findings or [],
+    }
+    if blocking is not None:
+        kwargs["blocking"] = blocking
+    return await client._request("task_verdict", **kwargs)
+
+
+@mcp.tool()
 async def channel_history(
     room: str = "room1",
     limit: int = 20,

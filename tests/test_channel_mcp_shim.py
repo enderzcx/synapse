@@ -229,3 +229,67 @@ async def test_channel_task_list_forwards(monkeypatch):
     result = await mcp_shim.channel_task_list(room="room1", status="doing")
     assert result["ok"] is True
     assert result["count"] == 1
+
+async def test_channel_task_handoff_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_handoff"
+            assert kwargs == {
+                "room": "room1",
+                "task_id": "t-001",
+                "artifacts": ["warroom/channel/broker.py"],
+                "verified": ["32/32 tests pass"],
+                "assumptions": [],
+                "next_action": "review edge cases",
+            }
+            return {"ok": True, "task_id": "t-001", "status": "review"}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_task_handoff(
+        task_id="t-001",
+        artifacts=["warroom/channel/broker.py"],
+        verified=["32/32 tests pass"],
+        assumptions=[],
+        next_action="review edge cases",
+        room="room1",
+    )
+    assert result["ok"] is True
+    assert result["status"] == "review"
+
+
+async def test_channel_task_verdict_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_verdict"
+            assert kwargs == {
+                "room": "room1",
+                "task_id": "t-001",
+                "verdict": "fail",
+                "findings": ["missing retry test"],
+                "blocking": True,
+            }
+            return {
+                "ok": True,
+                "task_id": "t-001",
+                "verdict": "fail",
+                "new_status": "doing",
+            }
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_task_verdict(
+        task_id="t-001",
+        verdict="fail",
+        findings=["missing retry test"],
+        blocking=True,
+        room="room1",
+    )
+    assert result["ok"] is True
+    assert result["new_status"] == "doing"

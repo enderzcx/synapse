@@ -620,3 +620,145 @@ async def test_broadcast_prunes_dead_peers(broker):
     # The dead peer should have been pruned out of rooms + active_joins
     assert state_dead not in broker.rooms.get("room1", [])
     assert ("room1", "codex") not in broker.active_joins
+
+async def test_task_handoff_sets_review_and_stores_last_handoff(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_handoff",
+        "req_id": "th1",
+        "room": "room1",
+        "task_id": task_id,
+        "artifacts": ["warroom/channel/broker.py"],
+        "verified": ["32/32 tests pass"],
+        "assumptions": [],
+        "next_action": "review edge cases",
+    })
+    ack = ws.sent[-1]
+    assert ack["op"] == "task_handoff_ack"
+    assert ack["ok"] is True
+    assert ack["status"] == "review"
+
+    task = broker.tasks[("room1", task_id)]
+    assert task["status"] == "review"
+    assert task["last_handoff"]["from"] == "claude"
+    assert task["last_handoff"]["artifacts"] == ["warroom/channel/broker.py"]
+    assert task["last_handoff"]["verified"] == ["32/32 tests pass"]
+    assert task["last_handoff"]["next_action"] == "review edge cases"
+
+
+async def test_task_verdict_updates_status_and_stores_last_verdict(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+    await broker.handle_frame(state, {
+        "op": "task_handoff",
+        "req_id": "th1",
+        "room": "room1",
+        "task_id": task_id,
+    })
+
+    await broker.handle_frame(state, {
+        "op": "task_verdict",
+        "req_id": "tv1",
+        "room": "room1",
+        "task_id": task_id,
+        "verdict": "pass",
+        "findings": [],
+    })
+    ack = ws.sent[-1]
+    assert ack["op"] == "task_verdict_ack"
+    assert ack["ok"] is True
+    assert ack["new_status"] == "done"
+
+    task = broker.tasks[("room1", task_id)]
+    assert task["status"] == "done"
+    assert task["last_verdict"]["by"] == "claude"
+    assert task["last_verdict"]["verdict"] == "pass"
+    assert task["last_verdict"]["findings"] == []
+
+
+@pytest.mark.parametrize(
+    ("verdict", "expected_status"),
+    [("fail", "doing"), ("needs_info", "blocked")],
+)
+async def test_task_verdict_non_pass_status_mappings(broker, verdict, expected_status):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_verdict",
+        "req_id": "tv1",
+        "room": "room1",
+        "task_id": task_id,
+        "verdict": verdict,
+        "findings": ["needs follow-up"],
+    })
+    ack = ws.sent[-1]
+    assert ack["op"] == "task_verdict_ack"
+    assert ack["new_status"] == expected_status
+    assert broker.tasks[("room1", task_id)]["status"] == expected_status
+
+
+async def test_task_verdict_rejects_invalid_verdict(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_verdict",
+        "req_id": "tv1",
+        "room": "room1",
+        "task_id": task_id,
+        "verdict": "shrug",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "bad_request"
+    assert "verdict must be pass|fail|needs_info" in err["message"]
+
+
+async def test_task_handoff_rejects_missing_task(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_handoff",
+        "req_id": "th1",
+        "room": "room1",
+        "task_id": "t-404",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "not_found"
