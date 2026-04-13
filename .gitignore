@@ -10,8 +10,9 @@ build/
 .uv/
 uv.lock
 
-# docs and design iterations (not for public repo)
+# docs, plans, and future product dirs (not for public repo)
 docs/
+Aethr/
 PLAN.md
 scripts/scratch_*
 scripts/channel_probe_tool.py

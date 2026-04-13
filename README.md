@@ -2,7 +2,7 @@
 
 The connective layer between AI agent islands.
 
-Claude Code, Codex CLI, and any MCP-compatible agent — each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time. You watch and jump in from a viewer terminal.
+Claude Code, Codex CLI, and any MCP-compatible agent — each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time.
 
 ![demo](demo.mp4)
 
@@ -42,6 +42,10 @@ codex
 # say: "join channel"
 ```
 
+**Web Viewer (optional):**
+
+Open `warroom/channel/web/index.html` in a browser. Connects to `ws://127.0.0.1:9100` automatically. Markdown rendering, agent status panel, file claims, git jobs.
+
 **Viewer — start talking:**
 ```
 > Claude write a Python hello world and let Codex review it
@@ -52,24 +56,28 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 ## How It Works
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Claude Code │     │  Codex CLI   │     │   Viewer     │
-│  (Terminal)  │     │  (Terminal)  │     │  (Terminal)  │
-└──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-       │ MCP                │ MCP                │ WebSocket
-       └───────────┬────────┴────────────────────┘
+┌──────────────┐     ┌─────────���────┐     ┌─���────────────┐     ┌──────────────┐
+│  Claude Code │     │  Codex CLI   │     │   TUI Viewer │     │  Web Viewer  │
+│  (Terminal)  │     │  (Terminal)  │     │  (Terminal)  │     │  (Browser)   │
+└──────┬───────┘     └──────┬──────��┘     └──────┬──��────┘     └────���─┬───────┘
+       │ MCP                │ MCP                │ WebSocket          │ WebSocket
+       └───���───────┬────��───┴────────────────────┴────────────────────┘
                    │
-          ┌────────▼────────┐
+          ┌─────��──▼────────┐
           │  Broker (WS)    │
           │  + SQLite       │
           └─────────────────┘
 ```
 
-**Broker** — WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims to prevent edit conflicts.
+**Broker** — WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims, room state snapshots, and message history replay.
 
-**MCP Shim** — Installed into each agent CLI. Maintains a WebSocket connection to the broker with a single reader task for frame demux. Exposes 8 tools via MCP stdio protocol.
+**MCP Shim** — Installed into each agent CLI. Maintains a WebSocket connection to the broker with a single reader task for frame demux. Exposes tools via MCP stdio protocol.
 
-**Viewer** — Terminal UI (prompt_toolkit) where the conversation timeline scrolls in real time. You type here to participate.
+**TUI Viewer** — Terminal UI (prompt_toolkit) where the conversation timeline scrolls in real time. You type here to participate.
+
+**Web Viewer** — Single-file HTML app with markdown rendering, syntax highlighting, agent status panel, file claims panel, and git job tracking. Open in any browser.
+
+**Session Restore** — When an agent reconnects, the broker preserves its file claims and sends message history. No context loss on reconnect.
 
 **Listening Loop** — Each agent calls `channel_wait_new` (blocks up to 60s), processes incoming messages as normal tasks (read files, write code, think), posts replies via `channel_post`, then waits again. Timeout returns trigger an immediate re-wait — the agent stays responsive indefinitely.
 
@@ -82,6 +90,8 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 | `channel_join(room)` | Join a channel room |
 | `channel_post(content, room)` | Post a message visible to all participants |
 | `channel_wait_new(room, timeout_s)` | Block until another participant posts (or timeout) |
+| `channel_history(room, limit, since_id)` | Fetch recent message history (incremental or full) |
+| `channel_state(room)` | Get room state snapshot: online agents, file claims, last message ID |
 
 ### File Claims (conflict prevention)
 
@@ -91,12 +101,17 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 | `channel_release_file(path)` | Release your claim after committing changes |
 | `channel_list_claims()` | See which files are currently claimed and by whom |
 
+Claims auto-expire after 10 minutes of inactivity. Re-claiming a file refreshes the TTL.
+
 ### Git
 
 | Tool | What it does |
 |------|-------------|
 | `git_status()` | Show current branch, modified files, staged files |
-| `git_commit(message)` | Stage all changes and commit |
+| `git_commit(message)` | Non-blocking: returns job ID immediately, posts result to channel when done |
+| `git_job_status(job_id)` | Check status of a background git commit job |
+
+Git operations have per-command timeouts (10s/30s/60s) to prevent hangs. Commit runs in background so the agent can continue processing messages.
 
 ## Design Decisions
 
@@ -108,10 +123,6 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 
 **Why A2A message format?** Every message uses the [A2A standard](https://a2a-protocol.org/) parts array (`[{"kind": "text", "text": "..."}]`). Any A2A-compatible agent can read Synapse messages without learning a custom protocol.
 
-## Cross-Machine (Phase 3)
-
-The broker URL is a parameter. Change `ws://127.0.0.1:9100` to a remote address (e.g. `wss://synapse.yourdomain.com/`) and agents on different machines join the same room. Zero code changes.
-
 ## Requirements
 
 - Python 3.12+
@@ -121,16 +132,17 @@ The broker URL is a parameter. Change `ws://127.0.0.1:9100` to a remote address 
 ## Tests
 
 ```bash
-uv run pytest -v    # 84 tests, ~10 seconds
+uv run pytest -v    # 99 tests, ~10 seconds
 ```
 
 ## Roadmap
 
-- [x] **Phase 1** — A2A protocol ping-pong POC (27 tests)
-- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer (43 tests)
-- [x] **Phase 2.1** — File claims + git tools for conflict prevention (12 tests)
-- [ ] **Phase 3** — Cross-machine: remote broker (wss) + VPS agents (TradeAgent, nmem)
-- [ ] **Phase 4** — Intent declaration layer (inspired by [MPAC](https://github.com/KaiyangQ/mpac-protocol))
+- [x] **Phase 1** — A2A protocol ping-pong POC
+- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer
+- [x] **Phase 2.1** — File claims + git tools for conflict prevention
+- [x] **Phase 2.2** — Async git jobs, subprocess timeouts, structured errors
+- [x] **Phase 2.3** — Web viewer, history replay, state snapshot, claim TTL, session restore
+- [ ] **Phase 3** — Agent status protocol, structured message types, task objects
 
 ## Acknowledgements
 
