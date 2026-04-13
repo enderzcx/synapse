@@ -304,6 +304,96 @@ async def channel_peek_inbox(room: str = "room1") -> dict:
 
 
 @mcp.tool()
+async def channel_task_create(
+    title: str,
+    goal: str = "",
+    owner: str = "",
+    reviewer: str = "",
+    room: str = "room1",
+    acceptance: list[str] | None = None,
+    write_set: list[str] | None = None,
+) -> dict:
+    """Create a structured task object in the room.
+
+    USE instead of free-text task assignments. Tasks have explicit owner,
+    reviewer, acceptance criteria, and status tracking. This prevents
+    AI drift by making goals and boundaries explicit.
+
+    Returns {"ok": true, "task": {...}}.
+    """
+    client = await _ensure_client()
+    kwargs: dict = {"room": room, "title": title, "goal": goal}
+    if owner:
+        kwargs["owner"] = owner
+    else:
+        kwargs["owner"] = _actor
+    if reviewer:
+        kwargs["reviewer"] = reviewer
+    if acceptance:
+        kwargs["acceptance"] = acceptance
+    if write_set:
+        kwargs["write_set"] = write_set
+    return await client._request("task_create", **kwargs)
+
+
+@mcp.tool()
+async def channel_task_update(
+    task_id: str,
+    status: str | None = None,
+    owner: str | None = None,
+    reviewer: str | None = None,
+    goal: str | None = None,
+    room: str = "room1",
+    acceptance: list[str] | None = None,
+    write_set: list[str] | None = None,
+) -> dict:
+    """Update a task's status or fields.
+
+    Status must be one of: todo, doing, review, done, blocked.
+
+    Returns {"ok": true, "task": {...}}.
+    """
+    client = await _ensure_client()
+    kwargs: dict = {"room": room, "task_id": task_id}
+    if status is not None:
+        kwargs["status"] = status
+    if owner is not None:
+        kwargs["owner"] = owner
+    if reviewer is not None:
+        kwargs["reviewer"] = reviewer
+    if goal is not None:
+        kwargs["goal"] = goal
+    if acceptance is not None:
+        kwargs["acceptance"] = acceptance
+    if write_set is not None:
+        kwargs["write_set"] = write_set
+    return await client._request("task_update", **kwargs)
+
+
+@mcp.tool()
+async def channel_task_get(task_id: str, room: str = "room1") -> dict:
+    """Get details of a specific task.
+
+    Returns {"ok": true, "task": {...}}.
+    """
+    client = await _ensure_client()
+    return await client._request("task_get", room=room, task_id=task_id)
+
+
+@mcp.tool()
+async def channel_task_list(room: str = "room1", status: str | None = None) -> dict:
+    """List all tasks in the room, optionally filtered by status.
+
+    Returns {"ok": true, "tasks": [...], "count": N}.
+    """
+    client = await _ensure_client()
+    kwargs: dict = {"room": room}
+    if status is not None:
+        kwargs["status"] = status
+    return await client._request("task_list", **kwargs)
+
+
+@mcp.tool()
 async def channel_history(
     room: str = "room1",
     limit: int = 20,

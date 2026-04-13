@@ -136,3 +136,96 @@ async def test_channel_peek_control_forwards(monkeypatch):
         "controls": [{"op": "control", "action": "interrupt"}],
         "count": 1,
     }
+
+
+async def test_channel_task_create_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_create"
+            assert kwargs == {
+                "room": "room1",
+                "title": "Implement task registry",
+                "goal": "Reduce drift",
+                "owner": "codex",
+                "reviewer": "claude",
+                "acceptance": ["tasks visible in room_state"],
+                "write_set": ["warroom/channel/broker.py"],
+            }
+            return {"ok": True, "task": {"task_id": "t-001"}}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+    monkeypatch.setattr(mcp_shim, "_actor", "codex")
+
+    result = await mcp_shim.channel_task_create(
+        title="Implement task registry",
+        goal="Reduce drift",
+        owner="codex",
+        reviewer="claude",
+        room="room1",
+        acceptance=["tasks visible in room_state"],
+        write_set=["warroom/channel/broker.py"],
+    )
+    assert result == {"ok": True, "task": {"task_id": "t-001"}}
+
+
+async def test_channel_task_update_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_update"
+            assert kwargs == {
+                "room": "room1",
+                "task_id": "t-001",
+                "status": "doing",
+                "owner": "claude",
+            }
+            return {"ok": True, "task": {"task_id": "t-001", "status": "doing"}}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_task_update(
+        task_id="t-001",
+        status="doing",
+        owner="claude",
+        room="room1",
+    )
+    assert result["ok"] is True
+    assert result["task"]["status"] == "doing"
+
+
+async def test_channel_task_get_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_get"
+            assert kwargs == {"room": "room1", "task_id": "t-001"}
+            return {"ok": True, "task": {"task_id": "t-001"}}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_task_get("t-001", room="room1")
+    assert result == {"ok": True, "task": {"task_id": "t-001"}}
+
+
+async def test_channel_task_list_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "task_list"
+            assert kwargs == {"room": "room1", "status": "doing"}
+            return {"ok": True, "tasks": [{"task_id": "t-001"}], "count": 1}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_task_list(room="room1", status="doing")
+    assert result["ok"] is True
+    assert result["count"] == 1

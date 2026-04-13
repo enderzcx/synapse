@@ -263,6 +263,127 @@ async def test_room_state_includes_active_agents_claims_and_last_msg_id(broker):
     assert resp["last_msg_id"] == last_msg_id
 
 
+async def test_task_crud_and_room_state_exposes_active_tasks(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Implement task registry",
+        "goal": "Reduce drift",
+        "owner": "claude",
+        "reviewer": "codex",
+        "acceptance": ["room_state includes tasks"],
+        "write_set": ["warroom/channel/broker.py"],
+    })
+    created = ws.sent[-1]
+    assert created["op"] == "task_created"
+    assert created["ok"] is True
+    task_id = created["task"]["task_id"]
+    assert task_id == "t-001"
+    assert created["task"]["status"] == "todo"
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu1",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "doing",
+    })
+    updated = ws.sent[-1]
+    assert updated["op"] == "task_updated"
+    assert updated["task"]["status"] == "doing"
+
+    await broker.handle_frame(state, {
+        "op": "task_get",
+        "req_id": "tg1",
+        "room": "room1",
+        "task_id": task_id,
+    })
+    detail = ws.sent[-1]
+    assert detail["op"] == "task_detail"
+    assert detail["task"]["task_id"] == task_id
+
+    await broker.handle_frame(state, {
+        "op": "room_state",
+        "req_id": "rs1",
+        "room": "room1",
+    })
+    room_state = ws.sent[-1]
+    assert room_state["op"] == "room_state"
+    assert room_state["tasks"] == [{
+        "task_id": task_id,
+        "title": "Implement task registry",
+        "owner": "claude",
+        "status": "doing",
+    }]
+
+
+async def test_task_list_can_filter_by_status(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_a = ws.sent[-1]["task"]["task_id"]
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu1",
+        "room": "room1",
+        "task_id": task_a,
+        "status": "doing",
+    })
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc2",
+        "room": "room1",
+        "title": "Task B",
+    })
+
+    await broker.handle_frame(state, {
+        "op": "task_list",
+        "req_id": "tl1",
+        "room": "room1",
+        "status": "doing",
+    })
+    result = ws.sent[-1]
+    assert result["op"] == "task_list_result"
+    assert result["count"] == 1
+    assert [task["task_id"] for task in result["tasks"]] == [task_a]
+
+
+async def test_task_update_rejects_invalid_status(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu1",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "sideways",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "bad_request"
+    assert "invalid status" in err["message"]
+
+
 async def test_multi_room_isolation(broker):
     ws_a = FakeWebSocket()
     await _join(broker, ws_a, actor="claude", client_id="c1", room="room1", req_id="j1")

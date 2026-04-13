@@ -57,6 +57,9 @@ class Broker:
         # File claims: {(room, path): (actor, claimed_at)} — lightweight lock
         # to prevent two agents from simultaneously editing the same file.
         self.file_claims: dict[tuple[str, str], tuple[str, float]] = {}
+        # Task registry: {(room, task_id): task_dict} — structured task objects
+        self.tasks: dict[tuple[str, str], dict[str, Any]] = {}
+        self._task_counter = 0
 
     # --- top-level entry points ---
 
@@ -74,6 +77,14 @@ class Broker:
             await self._on_release_file(state, frame)
         elif op == "list_claims":
             await self._on_list_claims(state, frame)
+        elif op == "task_create":
+            await self._on_task_create(state, frame)
+        elif op == "task_update":
+            await self._on_task_update(state, frame)
+        elif op == "task_get":
+            await self._on_task_get(state, frame)
+        elif op == "task_list":
+            await self._on_task_list(state, frame)
         elif op == "history":
             await self._on_history(state, frame)
         elif op == "room_state":
@@ -417,6 +428,142 @@ class Broker:
             "ok": True, "claims": claims,
         })
 
+    # --- task registry ---
+
+    VALID_TASK_STATUSES = {"todo", "doing", "review", "done", "blocked"}
+
+    async def _on_task_create(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        title = frame.get("title")
+        goal = frame.get("goal", "")
+        owner = frame.get("owner", state.actor or "unknown")
+        reviewer = frame.get("reviewer", "")
+        acceptance = frame.get("acceptance", [])
+        write_set = frame.get("write_set", [])
+
+        if not isinstance(title, str) or not title.strip():
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "bad_request", "message": "task_create requires non-empty title",
+            })
+            return
+
+        self._task_counter += 1
+        task_id = f"t-{self._task_counter:03d}"
+        now = time.time()
+        task = {
+            "task_id": task_id,
+            "room": room,
+            "title": title,
+            "goal": goal,
+            "owner": owner,
+            "reviewer": reviewer,
+            "status": "todo",
+            "acceptance": acceptance if isinstance(acceptance, list) else [],
+            "write_set": write_set if isinstance(write_set, list) else [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        self.tasks[(room, task_id)] = task
+
+        await self._send(state, {
+            "op": "task_created", "reply_to_req_id": req_id,
+            "ok": True, "task": task,
+        })
+
+        # Broadcast task creation to room
+        from warroom.channel.protocol import text_part
+        msg = Message(
+            id=0, ts=now, room=room, actor=state.actor or "unknown",
+            client_id=state.client_id,
+            parts=[text_part(f"[task] created {task_id}: {title} (owner: {owner})")],
+        )
+        new_id = insert_message(self._db, msg)
+        msg.id = new_id
+        await self._broadcast(room, msg.to_dict(), exclude_client_id=state.client_id)
+
+    async def _on_task_update(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        task_id = frame.get("task_id")
+
+        if not isinstance(task_id, str):
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "bad_request", "message": "task_update requires task_id",
+            })
+            return
+
+        task = self.tasks.get((room, task_id))
+        if task is None:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_found", "message": f"task {task_id!r} not found in {room!r}",
+            })
+            return
+
+        # Apply allowed updates
+        new_status = frame.get("status")
+        if new_status is not None:
+            if new_status not in self.VALID_TASK_STATUSES:
+                await self._send(state, {
+                    "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                    "code": "bad_request",
+                    "message": f"invalid status {new_status!r}, must be one of {self.VALID_TASK_STATUSES}",
+                })
+                return
+            task["status"] = new_status
+
+        for field in ("owner", "reviewer", "goal"):
+            val = frame.get(field)
+            if isinstance(val, str):
+                task[field] = val
+        for field in ("acceptance", "write_set"):
+            val = frame.get(field)
+            if isinstance(val, list):
+                task[field] = val
+
+        task["updated_at"] = time.time()
+
+        await self._send(state, {
+            "op": "task_updated", "reply_to_req_id": req_id,
+            "ok": True, "task": task,
+        })
+
+    async def _on_task_get(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        task_id = frame.get("task_id")
+
+        task = self.tasks.get((room, task_id)) if isinstance(task_id, str) else None
+        if task is None:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_found", "message": f"task {task_id!r} not found",
+            })
+            return
+
+        await self._send(state, {
+            "op": "task_detail", "reply_to_req_id": req_id,
+            "ok": True, "task": task,
+        })
+
+    async def _on_task_list(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        status_filter = frame.get("status")
+
+        tasks = [
+            t for (r, _), t in self.tasks.items()
+            if r == room and (status_filter is None or t["status"] == status_filter)
+        ]
+
+        await self._send(state, {
+            "op": "task_list_result", "reply_to_req_id": req_id,
+            "ok": True, "tasks": tasks, "count": len(tasks),
+        })
+
     async def _on_history(self, state: ConnState, frame: dict[str, Any]) -> None:
         req_id = frame.get("req_id")
         room = frame.get("room", "room1")
@@ -453,6 +600,13 @@ class Broker:
             if k[0] == room
         ]
 
+        # Active tasks
+        active_tasks = [
+            {"task_id": t["task_id"], "title": t["title"], "owner": t["owner"], "status": t["status"]}
+            for (r, _), t in self.tasks.items()
+            if r == room and t["status"] not in ("done",)
+        ]
+
         await self._send(state, {
             "op": "room_state",
             "reply_to_req_id": req_id,
@@ -460,6 +614,7 @@ class Broker:
             "room": room,
             "active_agents": active_agents,
             "claims": claims,
+            "tasks": active_tasks,
             "last_msg_id": self._last_msg_id(room),
         })
 
