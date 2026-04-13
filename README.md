@@ -2,7 +2,7 @@
 
 The connective layer between AI agent islands.
 
-Claude Code, Codex CLI, and any MCP-compatible agent — each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time.
+Claude Code, Codex CLI, and any MCP-compatible agent -- each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time.
 
 ![demo](demo.mp4)
 
@@ -23,19 +23,19 @@ cd synapse
 uv sync --extra dev
 ```
 
-**Terminal 1 — Synapse (broker + viewer in one command):**
+**Terminal 1 -- Synapse (broker + viewer in one command):**
 ```bash
 uv run synapse start
 ```
 
-**Terminal 2 — Claude Code:**
+**Terminal 2 -- Claude Code:**
 ```bash
 claude
 # approve the channel MCP when prompted, then type:
 /channel-listen
 ```
 
-**Terminal 3 — Codex CLI:**
+**Terminal 3 -- Codex CLI:**
 ```bash
 codex mcp add channel -- cmd /c uv run python -m warroom.channel.mcp_shim --actor codex --broker ws://127.0.0.1:9100
 codex
@@ -46,7 +46,7 @@ codex
 
 Open `warroom/channel/web/index.html` in a browser. Connects to `ws://127.0.0.1:9100` automatically. Markdown rendering, agent status panel, file claims, git jobs.
 
-**Viewer — start talking:**
+**Viewer -- start talking:**
 ```
 > Claude write a Python hello world and let Codex review it
 ```
@@ -69,17 +69,17 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
          +-----------------+
 ```
 
-**Broker** — WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims, room state snapshots, and message history replay.
+**Broker** -- WebSocket server on `127.0.0.1:9100` with SQLite message persistence. Broadcasts every message to all room subscribers. Manages file claims, room state snapshots, and message history replay.
 
-**MCP Shim** — Installed into each agent CLI. Maintains a WebSocket connection to the broker with a single reader task for frame demux. Exposes tools via MCP stdio protocol.
+**MCP Shim** -- Installed into each agent CLI. Maintains a WebSocket connection to the broker with a single reader task for frame demux. Exposes tools via MCP stdio protocol.
 
-**TUI Viewer** — Terminal UI (prompt_toolkit) where the conversation timeline scrolls in real time. You type here to participate.
+**TUI Viewer** -- Terminal UI (prompt_toolkit) where the conversation timeline scrolls in real time. You type here to participate.
 
-**Web Viewer** — Single-file HTML app with markdown rendering, syntax highlighting, agent status panel, file claims panel, and git job tracking. Open in any browser.
+**Web Viewer** -- Single-file HTML app with markdown rendering, syntax highlighting, agent status panel, file claims panel, and git job tracking. Open in any browser.
 
-**Session Restore** — When an agent reconnects, the broker preserves its file claims and sends message history. No context loss on reconnect.
+**Session Restore** -- When an agent reconnects, the broker preserves its file claims and sends message history. No context loss on reconnect.
 
-**Listening Loop** — Each agent calls `channel_wait_new` (blocks up to 60s), processes incoming messages as normal tasks (read files, write code, think), posts replies via `channel_post`, then waits again. Timeout returns trigger an immediate re-wait — the agent stays responsive indefinitely.
+**Listening Loop** -- Each agent calls `channel_wait_new` (blocks up to 60s), processes incoming messages as normal tasks (read files, write code, think), posts replies via `channel_post`, then waits again. Timeout returns trigger an immediate re-wait -- the agent stays responsive indefinitely.
 
 ## MCP Tools
 
@@ -97,7 +97,7 @@ Watch all three terminals. Claude writes code, Codex reviews, they go back and f
 
 | Tool | What it does |
 |------|-------------|
-| `channel_claim_file(path)` | Declare intent to edit a file — other agents are blocked from claiming it |
+| `channel_claim_file(path)` | Declare intent to edit a file -- other agents are blocked from claiming it |
 | `channel_release_file(path)` | Release your claim after committing changes |
 | `channel_list_claims()` | See which files are currently claimed and by whom |
 
@@ -115,9 +115,9 @@ Git operations have per-command timeouts (10s/30s/60s) to prevent hangs. Commit 
 
 ## Design Decisions
 
-**Why no branch isolation?** Branch isolation is a human pattern — humans can't resolve merge conflicts well, so they prevent them. AI agents *can* resolve conflicts. Synapse uses lightweight file-level claims instead: declare what you're editing, the broker detects overlaps, and agents negotiate through the channel.
+**Why no branch isolation?** Branch isolation is a human pattern -- humans can't resolve merge conflicts well, so they prevent them. AI agents *can* resolve conflicts. Synapse uses lightweight file-level claims instead: declare what you're editing, the broker detects overlaps, and agents negotiate through the channel.
 
-**Why not a headless worker?** Users want to see agents working in their real CLI terminals — reading files, calling tools, thinking. Headless workers are invisible. Synapse agents are your actual Claude Code and Codex CLI sessions.
+**Why not a headless worker?** Users want to see agents working in their real CLI terminals -- reading files, calling tools, thinking. Headless workers are invisible. Synapse agents are your actual Claude Code and Codex CLI sessions.
 
 **Why WebSocket, not shared files?** Shared-file approaches (like [agent-chat](https://github.com/larryflorio/agent-chat)) require polling and can't push. WebSocket broadcast means agents respond in seconds, not minutes.
 
@@ -137,12 +137,12 @@ uv run pytest -v    # 99 tests, ~10 seconds
 
 ## Roadmap
 
-- [x] **Phase 1** — A2A protocol ping-pong POC
-- [x] **Phase 2** — Real-time channel: broker + MCP shim + viewer
-- [x] **Phase 2.1** — File claims + git tools for conflict prevention
-- [x] **Phase 2.2** — Async git jobs, subprocess timeouts, structured errors
-- [x] **Phase 2.3** — Web viewer, history replay, state snapshot, claim TTL, session restore
-- [ ] **Phase 3** — Agent status protocol, structured message types, task objects
+- [x] **Phase 1** -- A2A protocol ping-pong POC
+- [x] **Phase 2** -- Real-time channel: broker + MCP shim + viewer
+- [x] **Phase 2.1** -- File claims + git tools for conflict prevention
+- [x] **Phase 2.2** -- Async git jobs, subprocess timeouts, structured errors
+- [x] **Phase 2.3** -- Web viewer, history replay, state snapshot, claim TTL, session restore
+- [ ] **Phase 3** -- Agent status protocol, structured message types, task objects
 
 ## Acknowledgements
 
