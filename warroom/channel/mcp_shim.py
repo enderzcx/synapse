@@ -248,6 +248,23 @@ async def channel_list_claims(room: str = "room1") -> dict:
 
 
 @mcp.tool()
+async def channel_peek_inbox(room: str = "room1") -> dict:
+    """Non-blocking check for new messages in your local inbox.
+
+    USE during long tasks (after editing a file, running a test, etc.)
+    to check if someone sent you a message while you were working.
+    Returns immediately -- never blocks or contacts the broker.
+
+    Returns {"ok": true, "messages": [...], "count": N}.
+    Empty list means no new messages. Messages returned here will NOT
+    appear in subsequent channel_wait_new calls.
+    """
+    client = await _ensure_client()
+    messages = client.peek_new(room)
+    return {"ok": True, "messages": messages, "count": len(messages)}
+
+
+@mcp.tool()
 async def channel_history(
     room: str = "room1",
     limit: int = 20,

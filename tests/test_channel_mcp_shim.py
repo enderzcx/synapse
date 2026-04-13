@@ -72,3 +72,22 @@ async def test_channel_state_forwards(monkeypatch):
     assert result["ok"] is True
     assert result["active_agents"][0]["actor"] == "claude"
     assert result["last_msg_id"] == 9
+
+
+async def test_channel_peek_inbox_forwards(monkeypatch):
+    class FakeClient:
+        def peek_new(self, room):
+            assert room == "room1"
+            return [{"id": 7, "content": "ping"}]
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_peek_inbox(room="room1")
+    assert result == {
+        "ok": True,
+        "messages": [{"id": 7, "content": "ping"}],
+        "count": 1,
+    }

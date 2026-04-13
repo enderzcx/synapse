@@ -224,6 +224,43 @@ class ChannelClient:
 
     # --- broadcast consumer ---
 
+    def peek_new(self, room: str) -> list[dict[str, Any]]:
+        """Non-blocking drain of buffered broadcast messages.
+
+        Returns all currently queued messages for the given room (excluding
+        self-sent). Does NOT block or contact the broker. Messages returned
+        here will NOT appear in subsequent wait_new() calls.
+
+        Safe to call during long tasks as a lightweight checkpoint.
+        """
+        messages: list[dict[str, Any]] = []
+        requeue: list[dict[str, Any]] = []
+        while True:
+            try:
+                msg = self._broadcasts.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if msg is _CLOSED_SENTINEL:
+                # Put sentinel back so wait_new still sees it
+                requeue.append(msg)
+                break
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("client_id") == self.client_id:
+                continue
+            msg_room = msg.get("room")
+            if msg_room is not None and msg_room != room:
+                requeue.append(msg)
+                continue
+            messages.append(msg)
+        # Put back messages that don't belong to this room / sentinel
+        for item in requeue:
+            try:
+                self._broadcasts.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+        return messages
+
     async def wait_new(self, room: str, timeout_s: float) -> dict[str, Any] | None:
         """Block until a broadcast arrives from a different client_id, or timeout.
 

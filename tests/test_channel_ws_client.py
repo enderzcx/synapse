@@ -171,3 +171,52 @@ async def test_wait_new_timeout_returns_none(broker_url):
         assert msg is None
     finally:
         await c.close()
+
+
+async def test_peek_new_drains_buffered_messages_without_duplicates(broker_url):
+    a = ChannelClient(broker_url, actor="claude")
+    b = ChannelClient(broker_url, actor="codex")
+    await a.connect()
+    await b.connect()
+    try:
+        await a.join("room1")
+        await b.join("room1")
+
+        await a.post("room1", content="first")
+        await a.post("room1", content="second")
+        await asyncio.sleep(0.1)
+
+        messages = b.peek_new("room1")
+        assert [msg["content"] for msg in messages] == ["first", "second"]
+
+        msg = await b.wait_new("room1", timeout_s=0.2)
+        assert msg is None
+    finally:
+        await a.close()
+        await b.close()
+
+
+async def test_peek_new_preserves_other_room_messages(broker_url):
+    a = ChannelClient(broker_url, actor="claude")
+    b = ChannelClient(broker_url, actor="codex")
+    await a.connect()
+    await b.connect()
+    try:
+        await a.join("room1")
+        await a.join("room2")
+        await b.join("room1")
+        await b.join("room2")
+
+        await a.post("room2", content="room2-msg")
+        await a.post("room1", content="room1-msg")
+        await asyncio.sleep(0.1)
+
+        room1_messages = b.peek_new("room1")
+        assert [msg["content"] for msg in room1_messages] == ["room1-msg"]
+
+        room2_message = await b.wait_new("room2", timeout_s=0.5)
+        assert room2_message is not None
+        assert room2_message["content"] == "room2-msg"
+    finally:
+        await a.close()
+        await b.close()
