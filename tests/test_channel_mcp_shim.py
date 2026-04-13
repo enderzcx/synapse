@@ -12,6 +12,7 @@ async def test_channel_join_forwards_recent_messages(monkeypatch):
             return {
                 "last_msg_id": 12,
                 "recent_messages": [{"id": 11, "content": "earlier"}],
+                "mentions": [{"id": 12, "content": "@codex ping"}],
                 "is_reconnect": False,
             }
 
@@ -31,6 +32,7 @@ async def test_channel_join_forwards_recent_messages(monkeypatch):
         "room": "room1",
         "last_msg_id": 12,
         "recent_messages": [{"id": 11, "content": "earlier"}],
+        "mentions": [{"id": 12, "content": "@codex ping"}],
         "is_reconnect": False,
     }
     assert calls == [("room1", "[system] codex joined room1", None)]
