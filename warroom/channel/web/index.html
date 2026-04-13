@@ -487,10 +487,16 @@ function handleFrame(frame) {
       break;
 
     case 'room_state':
-      // Full room state snapshot
+      // Full room state snapshot — broker is authoritative
       if (frame.ok) {
-        // Agents
+        // Agents: broker says who is connected right now
         if (Array.isArray(frame.active_agents)) {
+          // Mark all previously known agents as offline first
+          for (const [name, info] of agents) {
+            info.online = false;
+            info.status = 'offline';
+          }
+          // Then mark broker-confirmed agents as online
           for (const a of frame.active_agents) {
             if (a.actor !== ACTOR) {
               setAgent(a.actor, true, 'online');
@@ -784,6 +790,14 @@ function sendMessage() {
   inputEl.value = '';
   inputEl.style.height = 'auto';
 }
+
+// --- Periodic state refresh ---
+// Re-fetch room_state every 60s to keep agent/claims panels accurate
+setInterval(() => {
+  if (joined && ws && ws.readyState === WebSocket.OPEN) {
+    sendFrame({ op: 'room_state', room: ROOM });
+  }
+}, 60000);
 
 // --- Init ---
 connect();
