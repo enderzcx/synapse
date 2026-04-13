@@ -101,7 +101,8 @@ async def test_real_broker_join_post_broadcast(broker_server):
         assert bcast["msg"]["client_id"] == cid_claude
 
 
-async def test_real_broker_duplicate_actor_rejected(broker_server):
+async def test_real_broker_session_restore(broker_server):
+    """Same actor from new connection = session restore, not rejection."""
     port = broker_server
     url = f"ws://127.0.0.1:{port}"
     async with websockets.connect(url) as ws_a, \
@@ -116,9 +117,9 @@ async def test_real_broker_duplicate_actor_rejected(broker_server):
             "op": "join", "req_id": "j2",
             "room": "room1", "actor": "claude", "client_id": "c2",
         })
-        err = await _recv(ws_b)
-        assert err["op"] == "error"
-        assert err["code"] == "duplicate_actor"
+        resp = await _recv(ws_b)
+        assert resp["op"] == "joined"
+        assert resp["is_reconnect"] is True
 
 
 async def test_real_broker_self_excluded_from_broadcast(broker_server):

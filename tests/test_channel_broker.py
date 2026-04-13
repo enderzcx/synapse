@@ -74,10 +74,11 @@ async def test_join_success(broker):
     assert state in broker.rooms["room1"]
 
 
-async def test_join_duplicate_actor_rejected(broker):
+async def test_join_duplicate_actor_session_restore(broker):
+    """Same actor joining from a new connection = session restore, not rejection."""
     ws1 = FakeWebSocket()
     state1 = await _join(broker, ws1, actor="claude", client_id="c1", req_id="r1")
-    # Second join with same actor but different client_id — must reject
+    # Second join with same actor but different ConnState — session restore
     ws2 = FakeWebSocket()
     state2 = ConnState(ws=ws2, client_id="c2")
     await broker.handle_frame(state2, {
@@ -87,13 +88,13 @@ async def test_join_duplicate_actor_rejected(broker):
         "actor": "claude",
         "client_id": "c2",
     })
-    assert len(ws2.sent) == 1
-    err = ws2.sent[0]
-    assert err["op"] == FrameType.ERROR
-    assert err["code"] == "duplicate_actor"
-    assert err["reply_to_req_id"] == "r2"
-    # Original claim still owns it (v5: identity-based)
-    assert broker.active_joins[("room1", "claude")] is state1
+    resp = ws2.sent[0]
+    assert resp["op"] == FrameType.JOINED
+    assert resp["is_reconnect"] is True
+    # New state now owns the active join
+    assert broker.active_joins[("room1", "claude")] is state2
+    # Old state evicted from room
+    assert state1 not in broker.rooms["room1"]
 
 
 async def test_join_same_state_idempotent(broker):
@@ -321,12 +322,9 @@ async def test_unknown_op_returns_error(broker):
 
 # --- v5 regression tests for codex review round 4 findings ---
 
-async def test_stale_disconnect_does_not_clear_newer_owner(broker):
-    """v5 HIGH 1 regression: an old ConnState going through on_disconnect
-    must NOT clear the (room, actor) claim if a newer ConnState now owns it.
-    Without the fix, active_joins keyed on client_id alone would be wiped
-    by the old connection's cleanup, letting a third client steal the actor
-    while the owner is still live.
+async def test_session_restore_then_stale_disconnect(broker):
+    """Session restore: new ConnState takes over. Old ConnState disconnecting
+    afterwards must NOT clear the newer owner's active_joins entry.
     """
     ws_old = FakeWebSocket()
     state_old = ConnState(ws=ws_old, client_id="shared-cid")
@@ -340,22 +338,23 @@ async def test_stale_disconnect_does_not_clear_newer_owner(broker):
     assert ws_old.sent[-1]["op"] == FrameType.JOINED
     assert broker.active_joins[("room1", "claude")] is state_old
 
-    # A brand new ConnState happens to arrive with the SAME client_id.
-    # Per v5 fix, this is NOT an idempotent rejoin (identity differs) —
-    # it must be rejected so we don't have two ConnStates fighting over
-    # the same actor claim.
+    # New ConnState arrives — session restore (not rejection)
     ws_new = FakeWebSocket()
-    state_new = ConnState(ws=ws_new, client_id="shared-cid")
+    state_new = ConnState(ws=ws_new, client_id="shared-cid-2")
     await broker.handle_frame(state_new, {
         "op": FrameType.JOIN,
         "req_id": "j2",
         "room": "room1",
         "actor": "claude",
-        "client_id": "shared-cid",
+        "client_id": "shared-cid-2",
     })
-    assert ws_new.sent[-1]["op"] == FrameType.ERROR
-    assert ws_new.sent[-1]["code"] == "duplicate_actor"
-    assert broker.active_joins[("room1", "claude")] is state_old
+    assert ws_new.sent[-1]["op"] == FrameType.JOINED
+    assert ws_new.sent[-1]["is_reconnect"] is True
+    assert broker.active_joins[("room1", "claude")] is state_new
+
+    # Old state disconnects — must NOT clear new owner
+    await broker.on_disconnect(state_old)
+    assert broker.active_joins[("room1", "claude")] is state_new
 
 
 async def test_disconnect_only_clears_own_claim(broker):

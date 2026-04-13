@@ -72,12 +72,16 @@ async def channel_join(room: str = "room1") -> dict:
     """
     client = await _ensure_client()
     resp = await client.join(room)
-    # Broadcast system join notification
+    is_reconnect = resp.get("is_reconnect", False)
+    # Broadcast appropriate system notification
     try:
-        await client.post(room, content=f"[system] {_actor} joined {room}")
+        if is_reconnect:
+            await client.post(room, content=f"[system] {_actor} reconnected to {room}")
+        else:
+            await client.post(room, content=f"[system] {_actor} joined {room}")
     except Exception:
         pass  # non-fatal
-    return {"ok": True, "room": room, "last_msg_id": resp.get("last_msg_id", 0)}
+    return {"ok": True, "room": room, "last_msg_id": resp.get("last_msg_id", 0), "is_reconnect": is_reconnect}
 
 
 @mcp.tool()

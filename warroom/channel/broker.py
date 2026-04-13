@@ -135,20 +135,18 @@ class Broker:
 
         key = (room, actor)
         existing = self.active_joins.get(key)
-        # v5 HIGH 1 fix: accept idempotent re-join only if it's the SAME
-        # ConnState. Cross-connection idempotence-by-client_id is too risky:
-        # a stale disconnect of the old connection would then clear the
-        # claim out from under the new one.
-        if existing is not None and existing is not state:
-            await self._send(state, {
-                "op": FrameType.ERROR,
-                "reply_to_req_id": req_id,
-                "code": "duplicate_actor",
-                "message": f"actor {actor!r} already joined {room!r}",
-            })
-            return
+        is_reconnect = False
 
-        # Accept: either fresh join or idempotent re-join by the SAME state.
+        if existing is not None and existing is not state:
+            # Session restore: same actor reconnecting from a new connection.
+            # Evict the old connection and let the new one take over.
+            # This preserves file claims owned by the actor.
+            if room in self.rooms and existing in self.rooms[room]:
+                self.rooms[room].remove(existing)
+            existing.joined_rooms.discard(room)
+            is_reconnect = True
+
+        # Accept: fresh join, idempotent re-join, or session restore.
         self.active_joins[key] = state
         state.actor = actor
         state.client_id = client_id
@@ -167,6 +165,7 @@ class Broker:
             "room": room,
             "last_msg_id": last_msg_id,
             "recent_messages": recent_dicts,
+            "is_reconnect": is_reconnect,
             "ok": True,
         })
 

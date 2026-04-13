@@ -90,18 +90,18 @@ async def test_two_clients_broadcast_and_self_filter(broker_url):
         await b.close()
 
 
-async def test_duplicate_actor_rejected(broker_url):
+async def test_session_restore_on_duplicate_actor(broker_url):
+    """Same actor from new connection = session restore, not rejection."""
     a = ChannelClient(broker_url, actor="claude")
     await a.connect()
     try:
         await a.join("room1")
-        # Second client claiming same actor must get rejected
+        # Second client claiming same actor — session restore
         b = ChannelClient(broker_url, actor="claude")
         await b.connect()
         try:
-            with pytest.raises(ConnectionError) as exc:
-                await b.join("room1")
-            assert "duplicate_actor" in str(exc.value)
+            resp = await b.join("room1")
+            assert resp.get("ok") is True or resp.get("is_reconnect") is True
         finally:
             await b.close()
     finally:
