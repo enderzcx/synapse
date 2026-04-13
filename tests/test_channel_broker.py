@@ -762,3 +762,121 @@ async def test_task_handoff_rejects_missing_task(broker):
     err = ws.sent[-1]
     assert err["op"] == FrameType.ERROR
     assert err["code"] == "not_found"
+
+async def test_agent_status_updates_room_state(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "agent_status",
+        "req_id": "as1",
+        "room": "room1",
+        "phase": "coding",
+        "task_id": "t-001",
+        "detail": "editing broker",
+    })
+    ack = ws.sent[-1]
+    assert ack["op"] == "agent_status_ack"
+    assert ack["ok"] is True
+    assert ack["phase"] == "coding"
+
+    await broker.handle_frame(state, {
+        "op": "room_state",
+        "req_id": "rs1",
+        "room": "room1",
+    })
+    room_state = ws.sent[-1]
+    assert room_state["op"] == "room_state"
+    agent = room_state["active_agents"][0]
+    assert agent["actor"] == "claude"
+    assert agent["phase"] == "coding"
+    assert agent["task_id"] == "t-001"
+    assert agent["detail"] == "editing broker"
+
+
+async def test_agent_status_rejects_invalid_phase(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "agent_status",
+        "req_id": "as1",
+        "room": "room1",
+        "phase": "flying",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "bad_request"
+    assert "invalid phase" in err["message"]
+
+
+async def test_gate_blocks_doing_to_review_without_handoff(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu1",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "doing",
+    })
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu2",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "review",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "gate_blocked"
+    assert "handoff" in err["message"]
+
+
+async def test_gate_blocks_review_to_done_without_passing_verdict(broker):
+    ws = FakeWebSocket()
+    state = await _join(broker, ws, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state, {
+        "op": "task_create",
+        "req_id": "tc1",
+        "room": "room1",
+        "title": "Task A",
+    })
+    task_id = ws.sent[-1]["task"]["task_id"]
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu1",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "doing",
+    })
+    await broker.handle_frame(state, {
+        "op": "task_handoff",
+        "req_id": "th1",
+        "room": "room1",
+        "task_id": task_id,
+    })
+
+    await broker.handle_frame(state, {
+        "op": "task_update",
+        "req_id": "tu2",
+        "room": "room1",
+        "task_id": task_id,
+        "status": "done",
+    })
+    err = ws.sent[-1]
+    assert err["op"] == FrameType.ERROR
+    assert err["code"] == "gate_blocked"
+    assert "passing verdict" in err["message"]

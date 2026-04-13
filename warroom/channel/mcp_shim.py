@@ -304,6 +304,29 @@ async def channel_peek_inbox(room: str = "room1") -> dict:
 
 
 @mcp.tool()
+async def channel_set_status(
+    phase: str,
+    task_id: str | None = None,
+    detail: str = "",
+    room: str = "room1",
+) -> dict:
+    """Report your current status/phase to the room.
+
+    Phase must be one of: idle, planning, coding, testing, reviewing, blocked, waiting.
+
+    USE to let other agents and the viewer know what you're doing.
+    Call this when you start/finish a task or change activity.
+
+    Returns {"ok": true, "actor": "...", "phase": "..."}.
+    """
+    client = await _ensure_client()
+    kwargs: dict = {"room": room, "phase": phase, "detail": detail}
+    if task_id is not None:
+        kwargs["task_id"] = task_id
+    return await client._request("agent_status", **kwargs)
+
+
+@mcp.tool()
 async def channel_task_create(
     title: str,
     goal: str = "",

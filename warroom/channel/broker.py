@@ -60,6 +60,8 @@ class Broker:
         # Task registry: {(room, task_id): task_dict} — structured task objects
         self.tasks: dict[tuple[str, str], dict[str, Any]] = {}
         self._task_counter = 0
+        # Agent status: {(room, actor): status_dict} — heartbeat/presence
+        self.agent_status: dict[tuple[str, str], dict[str, Any]] = {}
 
     # --- top-level entry points ---
 
@@ -77,6 +79,8 @@ class Broker:
             await self._on_release_file(state, frame)
         elif op == "list_claims":
             await self._on_list_claims(state, frame)
+        elif op == "agent_status":
+            await self._on_agent_status(state, frame)
         elif op == "task_create":
             await self._on_task_create(state, frame)
         elif op == "task_update":
@@ -432,6 +436,46 @@ class Broker:
             "ok": True, "claims": claims,
         })
 
+    # --- agent status / heartbeat ---
+
+    VALID_AGENT_PHASES = {"idle", "planning", "coding", "testing", "reviewing", "blocked", "waiting"}
+
+    async def _on_agent_status(self, state: ConnState, frame: dict[str, Any]) -> None:
+        req_id = frame.get("req_id")
+        room = frame.get("room", "room1")
+        actor = state.actor
+        phase = frame.get("phase", "idle")
+        task_id = frame.get("task_id")
+        detail = frame.get("detail", "")
+
+        if actor is None or room not in state.joined_rooms:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "not_joined", "message": "must join room before reporting status",
+            })
+            return
+
+        if phase not in self.VALID_AGENT_PHASES:
+            await self._send(state, {
+                "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                "code": "bad_request",
+                "message": f"invalid phase {phase!r}, must be one of {self.VALID_AGENT_PHASES}",
+            })
+            return
+
+        self.agent_status[(room, actor)] = {
+            "actor": actor,
+            "phase": phase,
+            "task_id": task_id if isinstance(task_id, str) else None,
+            "detail": str(detail)[:200],
+            "updated_at": time.time(),
+        }
+
+        await self._send(state, {
+            "op": "agent_status_ack", "reply_to_req_id": req_id,
+            "ok": True, "actor": actor, "phase": phase,
+        })
+
     # --- task registry ---
 
     VALID_TASK_STATUSES = {"todo", "doing", "review", "done", "blocked"}
@@ -507,7 +551,7 @@ class Broker:
             })
             return
 
-        # Apply allowed updates
+        # Apply allowed updates with gate enforcement
         new_status = frame.get("status")
         if new_status is not None:
             if new_status not in self.VALID_TASK_STATUSES:
@@ -517,6 +561,25 @@ class Broker:
                     "message": f"invalid status {new_status!r}, must be one of {self.VALID_TASK_STATUSES}",
                 })
                 return
+            # Gate: review requires handoff first
+            old_status = task["status"]
+            if new_status == "review" and old_status == "doing" and not task.get("last_handoff"):
+                await self._send(state, {
+                    "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                    "code": "gate_blocked",
+                    "message": "cannot move to review without submitting a handoff first",
+                })
+                return
+            # Gate: done requires verdict(pass) first
+            if new_status == "done" and old_status == "review":
+                verdict = task.get("last_verdict")
+                if not verdict or verdict.get("verdict") != "pass":
+                    await self._send(state, {
+                        "op": FrameType.ERROR, "reply_to_req_id": req_id,
+                        "code": "gate_blocked",
+                        "message": "cannot move to done without a passing verdict",
+                    })
+                    return
             task["status"] = new_status
 
         for field in ("owner", "reviewer", "goal"):
@@ -698,11 +761,18 @@ class Broker:
         req_id = frame.get("req_id")
         room = frame.get("room", "room1")
 
-        # Active agents
+        # Active agents (with status if available)
         active_agents = []
         for (r, actor), conn in self.active_joins.items():
             if r == room:
-                active_agents.append({"actor": actor, "client_id": conn.client_id})
+                agent_info: dict[str, Any] = {"actor": actor, "client_id": conn.client_id}
+                status = self.agent_status.get((room, actor))
+                if status:
+                    agent_info["phase"] = status["phase"]
+                    agent_info["task_id"] = status.get("task_id")
+                    agent_info["detail"] = status.get("detail", "")
+                    agent_info["status_updated_at"] = status.get("updated_at")
+                active_agents.append(agent_info)
 
         # File claims
         claims = [

@@ -293,3 +293,28 @@ async def test_channel_task_verdict_forwards(monkeypatch):
     )
     assert result["ok"] is True
     assert result["new_status"] == "doing"
+
+async def test_channel_set_status_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "agent_status"
+            assert kwargs == {
+                "room": "room1",
+                "phase": "coding",
+                "detail": "editing broker",
+                "task_id": "t-001",
+            }
+            return {"ok": True, "actor": "codex", "phase": "coding"}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_set_status(
+        phase="coding",
+        task_id="t-001",
+        detail="editing broker",
+        room="room1",
+    )
+    assert result == {"ok": True, "actor": "codex", "phase": "coding"}
