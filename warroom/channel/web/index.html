@@ -452,8 +452,14 @@ function handleFrame(frame) {
   switch (frame.op) {
     case 'joined':
       joined = true;
-      // Request current claims snapshot
-      sendFrame({ op: 'list_claims', room: ROOM });
+      // Render history messages included in join response
+      if (Array.isArray(frame.recent_messages)) {
+        for (const msg of frame.recent_messages) {
+          handleMessage(msg);
+        }
+      }
+      // Request current state snapshot
+      sendFrame({ op: 'room_state', room: ROOM });
       break;
 
     case 'posted':
@@ -477,6 +483,28 @@ function handleFrame(frame) {
           claims.set(c.path, c.actor);
         }
         renderClaims();
+      }
+      break;
+
+    case 'room_state':
+      // Full room state snapshot
+      if (frame.ok) {
+        // Agents
+        if (Array.isArray(frame.active_agents)) {
+          for (const a of frame.active_agents) {
+            if (a.actor !== ACTOR) {
+              setAgent(a.actor, true, 'online');
+            }
+          }
+        }
+        // Claims
+        if (Array.isArray(frame.claims)) {
+          claims.clear();
+          for (const c of frame.claims) {
+            claims.set(c.path, c.actor);
+          }
+          renderClaims();
+        }
       }
       break;
 

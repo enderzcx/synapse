@@ -243,6 +243,45 @@ async def channel_list_claims(room: str = "room1") -> dict:
     return await client._request("list_claims", room=room)
 
 
+@mcp.tool()
+async def channel_history(
+    room: str = "room1",
+    limit: int = 20,
+    since_id: int | None = None,
+) -> dict:
+    """Fetch recent message history from a channel room.
+
+    USE after joining a room to catch up on what happened while you were away.
+    Returns messages in chronological order (oldest first).
+
+    Args:
+        room: Room name
+        limit: Max messages to return (1-200, default 20)
+        since_id: If provided, return messages after this ID (incremental fetch)
+
+    Returns {"ok": true, "room": "room1", "messages": [...]}.
+    """
+    client = await _ensure_client()
+    req: dict = {"room": room, "limit": min(limit, 200)}
+    if since_id is not None:
+        req["since_id"] = since_id
+    return await client._request("history", **req)
+
+
+@mcp.tool()
+async def channel_state(room: str = "room1") -> dict:
+    """Get a snapshot of the current room state.
+
+    USE after joining to quickly understand the current situation:
+    who is online, what files are claimed, and the last message ID.
+    This is more efficient than reading full message history.
+
+    Returns {"ok": true, "active_agents": [...], "claims": [...], "last_msg_id": int}.
+    """
+    client = await _ensure_client()
+    return await client._request("room_state", room=room)
+
+
 def main() -> None:
     global _actor, _broker_url, _repo_root
 

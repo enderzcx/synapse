@@ -1,11 +1,12 @@
 """File claim tests: agents declare intent to modify files,
 broker detects conflicts, prevents overwrite races."""
 import json
+import time
 from typing import Any
 
 import pytest
 
-from warroom.channel.broker import Broker, ConnState
+from warroom.channel.broker import CLAIM_TTL_S, Broker, ConnState
 from warroom.channel.db import init_db
 from warroom.channel.protocol import FrameType
 
@@ -175,5 +176,49 @@ async def test_list_claims(broker):
     assert resp["ok"] is True
     claims = resp["claims"]
     assert len(claims) == 2
-    assert {"path": "auth.py", "actor": "claude"} in claims
-    assert {"path": "db.py", "actor": "claude"} in claims
+    # Claims now include claimed_at timestamp; check path+actor
+    claim_summaries = [{"path": c["path"], "actor": c["actor"]} for c in claims]
+    assert {"path": "auth.py", "actor": "claude"} in claim_summaries
+    assert {"path": "db.py", "actor": "claude"} in claim_summaries
+    # Verify claimed_at is present
+    assert all("claimed_at" in c for c in claims)
+
+
+async def test_expire_stale_claims_auto_releases_and_broadcasts(broker):
+    state_a, ws_a = await _join(broker, "claude", "c1")
+    state_b, ws_b = await _join(broker, "codex", "c2")
+
+    await broker.handle_frame(state_a, {
+        "op": "claim_file", "req_id": "c1",
+        "room": "room1", "path": "auth.py",
+    })
+    broker.file_claims[("room1", "auth.py")] = (
+        "claude",
+        time.time() - CLAIM_TTL_S - 1,
+    )
+
+    await broker.expire_stale_claims()
+
+    assert ("room1", "auth.py") not in broker.file_claims
+    broadcasts = [f for f in ws_b.sent if f["op"] == "broadcast"]
+    assert any("claim expired" in f["msg"]["content"] for f in broadcasts)
+
+
+async def test_reclaim_refreshes_claim_timestamp(broker):
+    state, ws = await _join(broker, "claude")
+
+    await broker.handle_frame(state, {
+        "op": "claim_file", "req_id": "c1",
+        "room": "room1", "path": "auth.py",
+    })
+    first_ts = broker.file_claims[("room1", "auth.py")][1]
+
+    await broker.handle_frame(state, {
+        "op": "claim_file", "req_id": "c2",
+        "room": "room1", "path": "auth.py",
+    })
+    refreshed_ts = broker.file_claims[("room1", "auth.py")][1]
+
+    assert ws.sent[-1]["op"] == "file_claimed"
+    assert ws.sent[-1]["already_claimed"] is True
+    assert refreshed_ts >= first_ts

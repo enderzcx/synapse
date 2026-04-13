@@ -93,10 +93,22 @@ async def serve(
             ready_event.set()
         logger.info("broker serving on ws://%s:%d (db=%s)", host, real_port, db_path)
 
+        # Background task: expire stale file claims every 60s
+        async def _claim_ttl_loop() -> None:
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    await broker.expire_stale_claims()
+                except Exception:
+                    logger.exception("claim TTL sweep failed")
+
+        ttl_task = asyncio.create_task(_claim_ttl_loop())
+
         if stop_event is None:
             await asyncio.Future()  # run forever
         else:
             await stop_event.wait()
+        ttl_task.cancel()
     db.close()
     logger.info("broker stopped")
 

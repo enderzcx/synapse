@@ -170,6 +170,98 @@ async def test_post_excludes_self_from_broadcast(broker):
     assert len(broadcast_frames) == 0
 
 
+async def test_join_includes_recent_messages(broker):
+    ws_a = FakeWebSocket()
+    state_a = await _join(broker, ws_a, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state_a, {
+        "op": FrameType.POST,
+        "req_id": "p1",
+        "room": "room1",
+        "content": "first message",
+    })
+
+    ws_b = FakeWebSocket()
+    await _join(broker, ws_b, actor="codex", client_id="c2", req_id="j2")
+
+    joined = ws_b.sent[0]
+    assert joined["op"] == FrameType.JOINED
+    assert joined["ok"] is True
+    assert "recent_messages" in joined
+    assert len(joined["recent_messages"]) == 1
+    assert joined["recent_messages"][0]["content"] == "first message"
+
+
+async def test_history_returns_messages_since_id(broker):
+    ws_a = FakeWebSocket()
+    state_a = await _join(broker, ws_a, actor="claude", client_id="c1", req_id="j1")
+
+    await broker.handle_frame(state_a, {
+        "op": FrameType.POST,
+        "req_id": "p1",
+        "room": "room1",
+        "content": "one",
+    })
+    first_msg_id = ws_a.sent[-1]["msg_id"]
+
+    await broker.handle_frame(state_a, {
+        "op": FrameType.POST,
+        "req_id": "p2",
+        "room": "room1",
+        "content": "two",
+    })
+
+    await broker.handle_frame(state_a, {
+        "op": "history",
+        "req_id": "h1",
+        "room": "room1",
+        "since_id": first_msg_id,
+        "limit": 10,
+    })
+
+    resp = ws_a.sent[-1]
+    assert resp["op"] == "history"
+    assert resp["reply_to_req_id"] == "h1"
+    assert resp["ok"] is True
+    assert [m["content"] for m in resp["messages"]] == ["two"]
+
+
+async def test_room_state_includes_active_agents_claims_and_last_msg_id(broker):
+    ws_a = FakeWebSocket()
+    state_a = await _join(broker, ws_a, actor="claude", client_id="c1", req_id="j1")
+    ws_b = FakeWebSocket()
+    await _join(broker, ws_b, actor="codex", client_id="c2", req_id="j2")
+
+    await broker.handle_frame(state_a, {
+        "op": "claim_file",
+        "req_id": "c1",
+        "room": "room1",
+        "path": "auth.py",
+    })
+    await broker.handle_frame(state_a, {
+        "op": FrameType.POST,
+        "req_id": "p1",
+        "room": "room1",
+        "content": "hello",
+    })
+    last_msg_id = ws_a.sent[-1]["msg_id"]
+
+    await broker.handle_frame(state_a, {
+        "op": "room_state",
+        "req_id": "s1",
+        "room": "room1",
+    })
+
+    resp = ws_a.sent[-1]
+    assert resp["op"] == "room_state"
+    assert resp["reply_to_req_id"] == "s1"
+    assert resp["ok"] is True
+    assert {"actor": "claude", "client_id": "c1"} in resp["active_agents"]
+    assert {"actor": "codex", "client_id": "c2"} in resp["active_agents"]
+    assert any(c["path"] == "auth.py" and c["actor"] == "claude" for c in resp["claims"])
+    assert resp["last_msg_id"] == last_msg_id
+
+
 async def test_multi_room_isolation(broker):
     ws_a = FakeWebSocket()
     await _join(broker, ws_a, actor="claude", client_id="c1", room="room1", req_id="j1")

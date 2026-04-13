@@ -147,3 +147,29 @@ async def test_real_broker_self_excluded_from_broadcast(broker_server):
             assert extra_frame["op"] != "broadcast", f"self broadcast leaked: {extra_frame}"
         except asyncio.TimeoutError:
             pass  # expected: no further frames
+
+
+async def test_real_broker_join_returns_recent_messages(broker_server):
+    port = broker_server
+    url = f"ws://127.0.0.1:{port}"
+    async with websockets.connect(url) as ws_a, websockets.connect(url) as ws_b:
+        await _send(ws_a, {
+            "op": "join", "req_id": "j1",
+            "room": "room1", "actor": "claude", "client_id": "c1",
+        })
+        await _recv(ws_a)
+
+        await _send(ws_a, {
+            "op": "post", "req_id": "p1",
+            "room": "room1", "content": "hello history", "client_id": "c1",
+        })
+        await _recv(ws_a)
+
+        await _send(ws_b, {
+            "op": "join", "req_id": "j2",
+            "room": "room1", "actor": "codex", "client_id": "c2",
+        })
+        joined = await _recv(ws_b)
+        assert joined["op"] == "joined"
+        assert joined["ok"] is True
+        assert [m["content"] for m in joined["recent_messages"]] == ["hello history"]

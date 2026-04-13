@@ -37,3 +37,38 @@ async def test_git_job_status_forwards(monkeypatch):
     assert result["ok"] is True
     assert result["status"] == "succeeded"
     assert result["result"]["commit"] == "abc123"
+
+
+async def test_channel_history_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "history"
+            assert kwargs == {"room": "room1", "limit": 20, "since_id": 5}
+            return {"ok": True, "messages": [{"id": 6, "content": "hello"}]}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_history(room="room1", limit=20, since_id=5)
+    assert result["ok"] is True
+    assert result["messages"][0]["id"] == 6
+
+
+async def test_channel_state_forwards(monkeypatch):
+    class FakeClient:
+        async def _request(self, op, **kwargs):
+            assert op == "room_state"
+            assert kwargs == {"room": "room1"}
+            return {"ok": True, "active_agents": [{"actor": "claude"}], "claims": [], "last_msg_id": 9}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_state(room="room1")
+    assert result["ok"] is True
+    assert result["active_agents"][0]["actor"] == "claude"
+    assert result["last_msg_id"] == 9
