@@ -3,6 +3,39 @@
 from warroom.channel import mcp_shim
 
 
+async def test_channel_join_forwards_recent_messages(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        async def join(self, room):
+            assert room == "room1"
+            return {
+                "last_msg_id": 12,
+                "recent_messages": [{"id": 11, "content": "earlier"}],
+                "is_reconnect": False,
+            }
+
+        async def post(self, room, content, reply_to=None):
+            calls.append((room, content, reply_to))
+            return {"ok": True}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+    monkeypatch.setattr(mcp_shim, "_actor", "codex")
+
+    result = await mcp_shim.channel_join("room1")
+    assert result == {
+        "ok": True,
+        "room": "room1",
+        "last_msg_id": 12,
+        "recent_messages": [{"id": 11, "content": "earlier"}],
+        "is_reconnect": False,
+    }
+    assert calls == [("room1", "[system] codex joined room1", None)]
+
+
 async def test_git_commit_returns_job_id(monkeypatch):
     from warroom.channel import git_ops
 
