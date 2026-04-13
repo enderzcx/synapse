@@ -91,3 +91,48 @@ async def test_channel_peek_inbox_forwards(monkeypatch):
         "messages": [{"id": 7, "content": "ping"}],
         "count": 1,
     }
+
+
+async def test_channel_send_control_forwards(monkeypatch):
+    class FakeClient:
+        async def send_control(self, **kwargs):
+            assert kwargs == {
+                "room": "room1",
+                "target": "codex",
+                "action": "interrupt",
+                "task_id": "task-1",
+                "data": {"reason": "user_override"},
+            }
+            return {"ok": True}
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_send_control(
+        target="codex",
+        action="interrupt",
+        room="room1",
+        task_id="task-1",
+        data={"reason": "user_override"},
+    )
+    assert result == {"ok": True}
+
+
+async def test_channel_peek_control_forwards(monkeypatch):
+    class FakeClient:
+        def peek_control(self):
+            return [{"op": "control", "action": "interrupt"}]
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(mcp_shim, "_ensure_client", fake_ensure_client)
+
+    result = await mcp_shim.channel_peek_control(room="room1")
+    assert result == {
+        "ok": True,
+        "controls": [{"op": "control", "action": "interrupt"}],
+        "count": 1,
+    }

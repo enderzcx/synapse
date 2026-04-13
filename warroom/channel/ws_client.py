@@ -61,6 +61,7 @@ class ChannelClient:
         self._reader_task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._broadcasts: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._controls: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._closed = asyncio.Event()
 
     # --- lifecycle ---
@@ -123,8 +124,12 @@ class ChannelClient:
                         fut.set_result(frame)
                     continue
                 if frame.get("op") == FrameType.BROADCAST:
-                    # Unsolicited broadcast — drop into queue
+                    # Unsolicited broadcast — drop into message queue
                     await self._broadcasts.put(frame.get("msg") or {})
+                    continue
+                if frame.get("op") == FrameType.CONTROL:
+                    # Unsolicited control frame — drop into control queue
+                    await self._controls.put(frame)
                     continue
                 # Unknown unsolicited frame — log and ignore
                 logger.debug("client got unknown unsolicited frame: %r", frame)
@@ -260,6 +265,42 @@ class ChannelClient:
             except asyncio.QueueFull:
                 pass
         return messages
+
+    def peek_control(self) -> list[dict[str, Any]]:
+        """Non-blocking drain of buffered control frames.
+
+        Returns all currently queued control events (interrupt, cancel, etc.).
+        Safe to call during long tasks as a lightweight checkpoint.
+        """
+        controls: list[dict[str, Any]] = []
+        while True:
+            try:
+                frame = self._controls.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if isinstance(frame, dict):
+                controls.append(frame)
+        return controls
+
+    async def send_control(
+        self,
+        room: str,
+        target: str,
+        action: str,
+        task_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send a control frame to a specific target actor."""
+        kwargs: dict[str, Any] = {
+            "room": room,
+            "target": target,
+            "action": action,
+        }
+        if task_id is not None:
+            kwargs["task_id"] = task_id
+        if data is not None:
+            kwargs["data"] = data
+        return await self._request(FrameType.CONTROL, **kwargs)
 
     async def wait_new(self, room: str, timeout_s: float) -> dict[str, Any] | None:
         """Block until a broadcast arrives from a different client_id, or timeout.

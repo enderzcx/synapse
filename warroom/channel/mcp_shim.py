@@ -248,6 +248,45 @@ async def channel_list_claims(room: str = "room1") -> dict:
 
 
 @mcp.tool()
+async def channel_send_control(
+    target: str,
+    action: str,
+    room: str = "room1",
+    task_id: str | None = None,
+    data: dict | None = None,
+) -> dict:
+    """Send a control signal to a specific agent (e.g. interrupt, cancel).
+
+    USE to interrupt another agent's current task, cancel a job, or
+    send priority signals. The target agent receives this on a separate
+    control channel, not mixed with chat messages.
+
+    Returns {"ok": true} if the target was found and signal delivered.
+    Returns {"ok": false, "code": "target_not_found"} if target is not online.
+    """
+    client = await _ensure_client()
+    return await client.send_control(
+        room=room, target=target, action=action,
+        task_id=task_id, data=data,
+    )
+
+
+@mcp.tool()
+async def channel_peek_control(room: str = "room1") -> dict:
+    """Non-blocking check for incoming control signals (interrupt, cancel, etc.).
+
+    USE during long tasks to check if someone sent you a control signal.
+    Returns immediately -- never blocks. Control signals are separate from
+    regular chat messages.
+
+    Returns {"ok": true, "controls": [...], "count": N}.
+    """
+    client = await _ensure_client()
+    controls = client.peek_control()
+    return {"ok": True, "controls": controls, "count": len(controls)}
+
+
+@mcp.tool()
 async def channel_peek_inbox(room: str = "room1") -> dict:
     """Non-blocking check for new messages in your local inbox.
 

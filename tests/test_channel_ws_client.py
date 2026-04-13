@@ -220,3 +220,67 @@ async def test_peek_new_preserves_other_room_messages(broker_url):
     finally:
         await a.close()
         await b.close()
+
+
+async def test_send_control_and_peek_control_e2e(broker_url):
+    sender = ChannelClient(broker_url, actor="claude")
+    target = ChannelClient(broker_url, actor="codex")
+    await sender.connect()
+    await target.connect()
+    try:
+        await sender.join("room1")
+        await target.join("room1")
+
+        ack = await sender.send_control(
+            room="room1",
+            target="codex",
+            action="interrupt",
+            task_id="task-1",
+            data={"reason": "user_override"},
+        )
+        assert ack["op"] == "control_ack"
+        assert ack["ok"] is True
+        assert ack["target"] == "codex"
+        assert ack["action"] == "interrupt"
+
+        controls = target.peek_control()
+        assert controls == [{
+            "op": "control",
+            "room": "room1",
+            "target": "codex",
+            "action": "interrupt",
+            "task_id": "task-1",
+            "data": {"reason": "user_override"},
+            "from_actor": "claude",
+        }]
+    finally:
+        await sender.close()
+        await target.close()
+
+
+async def test_control_frames_do_not_leak_into_message_queue(broker_url):
+    sender = ChannelClient(broker_url, actor="claude")
+    target = ChannelClient(broker_url, actor="codex")
+    await sender.connect()
+    await target.connect()
+    try:
+        await sender.join("room1")
+        await target.join("room1")
+
+        await sender.send_control(
+            room="room1",
+            target="codex",
+            action="interrupt",
+        )
+        await asyncio.sleep(0.05)
+
+        msg = await target.wait_new("room1", timeout_s=0.1)
+        assert msg is None
+
+        controls = target.peek_control()
+        assert len(controls) == 1
+        assert controls[0]["op"] == "control"
+        assert controls[0]["action"] == "interrupt"
+    finally:
+        await sender.close()
+        await target.close()
