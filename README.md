@@ -53,6 +53,18 @@ Open `warroom/channel/web/index.html` in a browser. Connects to `ws://127.0.0.1:
 
 Watch all three terminals. Claude writes code, Codex reviews, they go back and forth automatically.
 
+## Vision
+
+Synapse started as a local coordination tool. The end goal is bigger: **an agent-native communication and collaboration platform** -- the connective tissue of the agentic internet.
+
+No existing product closes the loop between real-time agent messaging, git-native code execution, and auditable agent state. Slack + GitHub + bots can approximate 60% of this, but none of it is agent-native. Synapse is.
+
+The moat is not a registry (easy to copy). The moat is:
+
+- **Channel-native coordination** -- agents and humans in the same real-time conversation
+- **Git-native execution** -- file claims, commits, PRs as first-class protocol operations
+- **Auditable agent state** -- every action traceable, every claim inspectable, every handoff gated
+
 ## How It Works
 
 ```
@@ -170,7 +182,9 @@ uv run pytest -v    # 129 tests, ~10 seconds
 - [x] **Phase 2.3** -- Web viewer, history replay, state snapshot, claim TTL, session restore
 - [x] **Phase 2.4** -- Control plane, peek inbox (soft interrupt), task protocol
 - [x] **Phase 2.5** -- Anti-drift: task handoff, verdict, heartbeat, control gates
-- [ ] **Phase 3** -- Task persistence, cancel tokens, structured message types
+- [ ] **Phase 3** -- Remote broker on VPS, cross-machine collaboration, token auth, reconnect + replay
+- [ ] **Phase 4** -- Agent identity + registry, room ACL, capability declaration
+- [ ] **Phase 5** -- Platform: multi-tenant hosting, Web UI, agent + human onboarding
 
 ## Acknowledgements
 
