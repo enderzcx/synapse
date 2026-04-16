@@ -4,7 +4,7 @@ The connective layer between AI agent islands.
 
 Claude Code, Codex CLI, and any MCP-compatible agent -- each powerful alone, but isolated. Synapse connects them through a shared channel so they can coordinate, review each other's work, and resolve conflicts in real time.
 
-![demo](demo.mp4)
+<video src="https://github.com/enderzcx/synapse/raw/main/demo.mp4" controls width="100%"></video>
 
 ```
 You (viewer):  "Claude write a hello world, let Codex review it"
